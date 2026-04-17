@@ -1,0 +1,492 @@
+//! Block-convolution and DP lower bounds on W(E). All estimators are sound.
+
+use std::collections::HashMap;
+
+use crate::sasamoto::{gcd_slice, log_w_signed_sasamoto};
+
+/// Exact W(E) by enumerating 2^N subsets. Max N ≈ 25 in practice.
+pub fn brute_force_w(a: &[u64], e_target: u64) -> u64 {
+    let n = a.len();
+    assert!(n <= 30, "brute_force_w: N={} too large (max 30)", n);
+    let mut count = 0u64;
+    for mask in 0..(1u64 << n) {
+        let sum: u64 = (0..n).filter(|&j| mask & (1 << j) != 0).map(|j| a[j]).sum();
+        if sum == e_target {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Exact sumset of a small block: HashMap<sum, count> over all 2^n subsets.
+fn block_sumset(block: &[u64]) -> HashMap<u64, u128> {
+    let n = block.len();
+    let mut counts: HashMap<u64, u128> = HashMap::new();
+    for mask in 0..(1u64 << n) {
+        let sum: u64 = (0..n)
+            .filter(|&j| mask & (1 << j) != 0)
+            .map(|j| block[j])
+            .sum();
+        *counts.entry(sum).or_insert(0) += 1;
+    }
+    counts
+}
+
+/// Minkowski convolution; bails at `cap` — result is a sub-sumset, still a lower bound on W.
+fn convolve_capped(
+    a: &HashMap<u64, u128>,
+    b: &HashMap<u64, u128>,
+    cap: usize,
+) -> HashMap<u64, u128> {
+    let mut result: HashMap<u64, u128> = HashMap::new();
+    for (&s1, &c1) in a {
+        for (&s2, &c2) in b {
+            *result.entry(s1 + s2).or_insert(0) += c1 * c2;
+        }
+        if result.len() >= cap {
+            break;
+        }
+    }
+    result
+}
+
+/// When over cap, keeps entries closest to `target` — tighter lower bound on W(target).
+fn convolve_capped_near_target(
+    a: &HashMap<u64, u128>,
+    b: &HashMap<u64, u128>,
+    cap: usize,
+    target: u64,
+) -> HashMap<u64, u128> {
+    let mut result: HashMap<u64, u128> = HashMap::new();
+    for (&s1, &c1) in a {
+        for (&s2, &c2) in b {
+            *result.entry(s1 + s2).or_insert(0) += c1 * c2;
+        }
+    }
+    if result.len() <= cap {
+        return result;
+    }
+    let mut entries: Vec<(u64, u128)> = result.into_iter().collect();
+    entries.sort_by_key(|&(s, _)| (s as i64 - target as i64).unsigned_abs());
+    entries.truncate(cap);
+    entries.into_iter().collect()
+}
+
+fn convolve(a: &HashMap<u64, u128>, b: &HashMap<u64, u128>, cap: usize) -> HashMap<u64, u128> {
+    convolve_capped(a, b, cap)
+}
+
+/// 2^22 ≈ 4M entries fits in ~100MB; unbounded N≥20 with sat-scale values hits 10^9 entries (OOM).
+pub const SUMSET_CAP_DEFAULT: usize = 4_194_304;
+
+/// `DSS_SUMSET_CAP` env var or [`SUMSET_CAP_DEFAULT`]. Prefer `*_with_cap` over this process-wide state.
+pub fn sumset_cap() -> usize {
+    std::env::var("DSS_SUMSET_CAP")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(SUMSET_CAP_DEFAULT)
+}
+
+/// Block-convolved sumset. Over cap, remaining blocks fold naively as {0, v_i} — still a valid W lower bound.
+fn lookup_full_sumset_with_cap(a: &[u64], block_size: usize, cap: usize) -> HashMap<u64, u128> {
+    if a.is_empty() {
+        let mut m = HashMap::new();
+        m.insert(0u64, 1u128);
+        return m;
+    }
+    let k = block_size.max(1).min(a.len());
+    let blocks: Vec<&[u64]> = a.chunks(k).collect();
+    let mut combined = block_sumset(blocks[0]);
+    for block in &blocks[1..] {
+        let block_sums = if combined.len() >= cap {
+            let mut coarse = HashMap::new();
+            coarse.insert(0u64, 1u128);
+            for &v in *block {
+                let mut next = coarse.clone();
+                for (&s, &c) in &coarse {
+                    *next.entry(s + v).or_insert(0) += c;
+                }
+                coarse = next;
+                if coarse.len() >= cap {
+                    break;
+                }
+            }
+            coarse
+        } else {
+            block_sumset(block)
+        };
+        combined = convolve(&combined, &block_sums, cap);
+        if combined.len() >= cap {
+            break;
+        }
+    }
+    combined
+}
+
+/// Proximity-pruned variant: keeps entries closest to `target` when over cap.
+fn lookup_full_sumset_near_target(
+    a: &[u64],
+    block_size: usize,
+    cap: usize,
+    target: u64,
+) -> HashMap<u64, u128> {
+    if a.is_empty() {
+        let mut m = HashMap::new();
+        m.insert(0u64, 1u128);
+        return m;
+    }
+    let k = block_size.max(1).min(a.len());
+    let blocks: Vec<&[u64]> = a.chunks(k).collect();
+    let mut combined = block_sumset(blocks[0]);
+    for block in &blocks[1..] {
+        let block_sums = if combined.len() >= cap {
+            let mut coarse = HashMap::new();
+            coarse.insert(0u64, 1u128);
+            for &v in *block {
+                let mut next = coarse.clone();
+                for (&s, &c) in &coarse {
+                    *next.entry(s + v).or_insert(0) += c;
+                }
+                coarse = next;
+                if coarse.len() >= cap {
+                    break;
+                }
+            }
+            coarse
+        } else {
+            block_sumset(block)
+        };
+        combined = convolve_capped_near_target(&combined, &block_sums, cap, target);
+    }
+    combined
+}
+
+/// Block-convolution lower bound on W(E). k=N: exact; k=1: loose; k=15..20: practical sweet spot.
+///
+/// Returns `u128` because `W > 2^64` is reachable for N ≥ 64. Callers that cast
+/// to `f64` lose precision above 2^53 (f64 mantissa); that's acceptable for
+/// ratios/error reports but not for equality checks on large W.
+pub fn lookup_w(a: &[u64], e_target: u64, block_size: usize) -> Option<u128> {
+    if a.is_empty() {
+        return None;
+    }
+    let combined = lookup_full_sumset_with_cap(a, block_size, sumset_cap());
+    Some(*combined.get(&e_target).unwrap_or(&0))
+}
+
+/// Signed subset-sum lower bound: log #pairs (S ⊆ positives, T ⊆ negatives) with ΣS − ΣT = target.
+/// Proximity-pruned near `target`. CoinJoin convention: positives=outputs, negatives=inputs.
+pub fn log_lookup_w_signed_target_aware(
+    positives: &[u64],
+    negatives: &[u64],
+    target: i64,
+    block_size: usize,
+    cap: usize,
+) -> Option<f64> {
+    let abs_target = target.unsigned_abs();
+    let pos_target = if target >= 0 { abs_target } else { 0 };
+    let neg_target = if target < 0 { abs_target } else { 0 };
+
+    let pos_sums = lookup_full_sumset_near_target(positives, block_size, cap, pos_target);
+    let neg_sums = lookup_full_sumset_near_target(negatives, block_size, cap, neg_target);
+
+    let mut total: u128 = 0;
+    for (&s_pos, &c_pos) in &pos_sums {
+        let s_neg_required = (s_pos as i64).checked_sub(target)?;
+        if s_neg_required < 0 {
+            continue;
+        }
+        if let Some(&c_neg) = neg_sums.get(&(s_neg_required as u64)) {
+            total = total.saturating_add(c_pos.saturating_mul(c_neg));
+        }
+    }
+    if total == 0 {
+        Some(f64::NEG_INFINITY)
+    } else {
+        Some((total as f64).ln())
+    }
+}
+
+/// Sasamoto for N ≥ 40, target-aware lookup otherwise. Recommended signed entry point.
+pub fn log_w_signed_adaptive(
+    positives: &[u64],
+    negatives: &[u64],
+    target: i64,
+    block_size: usize,
+) -> Option<f64> {
+    let n_total = positives.len() + negatives.len();
+    if n_total >= 40
+        && let Some(v) = log_w_signed_sasamoto(positives, negatives, target)
+        && v.is_finite()
+    {
+        return Some(v);
+    }
+    let cap = sumset_cap();
+    log_lookup_w_signed_target_aware(positives, negatives, target, block_size, cap)
+        .filter(|v| v.is_finite())
+}
+
+pub fn log_lookup_w(a: &[u64], e_target: u64, block_size: usize) -> Option<f64> {
+    let w = lookup_w(a, e_target, block_size)?;
+    if w == 0 {
+        Some(f64::NEG_INFINITY)
+    } else {
+        Some((w as f64).ln())
+    }
+}
+
+/// Exact W(E) via DP: O(N · sum_max). `None` when sum_max exceeds `max_table_size`.
+///
+/// Returns `u128` to represent the exact count up to 2^N. Casting to `f64`
+/// loses precision above 2^53; fine for error ratios, not for equality.
+pub fn dp_w(a: &[u64], e_target: u64, max_table_size: usize) -> Option<u128> {
+    if a.is_empty() {
+        return None;
+    }
+
+    let g = gcd_slice(a);
+    if g == 0 {
+        return None;
+    }
+    if !e_target.is_multiple_of(g) {
+        return Some(0);
+    }
+
+    let a_norm: Vec<u64> = a.iter().map(|&v| v / g).collect();
+    let e_norm = e_target / g;
+    let sum_max: u64 = a_norm.iter().sum();
+
+    if e_norm > sum_max {
+        return Some(0);
+    }
+    if sum_max as usize > max_table_size {
+        return None;
+    }
+
+    let sz = sum_max as usize + 1;
+    let mut dp = vec![0u128; sz];
+    dp[0] = 1;
+
+    for &val in &a_norm {
+        let v = val as usize;
+        for j in (v..sz).rev() {
+            dp[j] += dp[j - v];
+        }
+    }
+
+    Some(dp[e_norm as usize])
+}
+
+pub fn log_dp_w(a: &[u64], e_target: u64, max_table_size: usize) -> Option<f64> {
+    let w = dp_w(a, e_target, max_table_size)?;
+    if w == 0 {
+        Some(f64::NEG_INFINITY)
+    } else {
+        Some((w as f64).ln())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_convolve_capped_near_target_retains_target() {
+        let mut a = HashMap::new();
+        for i in 0..100u64 {
+            a.insert(i, 1u128);
+        }
+        let mut b = HashMap::new();
+        b.insert(0, 1u128);
+        b.insert(50, 1u128);
+        let result = convolve_capped_near_target(&a, &b, 50, 75);
+        assert!(result.len() <= 50);
+        assert!(
+            result.contains_key(&75),
+            "target=75 should be retained in capped result"
+        );
+    }
+
+    #[test]
+    fn test_brute_force_w_u64() {
+        let a: Vec<u64> = vec![3, 7, 11, 5, 9];
+        let mut count = 0u64;
+        for mask in 0..(1u64 << a.len()) {
+            let sum: u64 = (0..a.len())
+                .filter(|&j| mask & (1 << j) != 0)
+                .map(|j| a[j])
+                .sum();
+            if sum == 15 {
+                count += 1;
+            }
+        }
+        assert_eq!(brute_force_w(&a, 15), count);
+        assert_eq!(brute_force_w(&a, 0), 1);
+        assert_eq!(brute_force_w(&a, 35), 1);
+        assert_eq!(brute_force_w(&a, 36), 0);
+    }
+
+    #[test]
+    fn test_lookup_exact_when_k_equals_n() {
+        let a: Vec<u64> = (1..=16).collect();
+        let n = a.len();
+
+        for e in 1..a.iter().sum() {
+            let exact = brute_force_w(&a, e);
+            let lookup = lookup_w(&a, e, n).unwrap();
+            assert_eq!(
+                lookup, exact as u128,
+                "E={}: brute={}, lookup={}",
+                e, exact, lookup
+            );
+        }
+    }
+
+    #[test]
+    fn test_lookup_is_lower_bound() {
+        let a: Vec<u64> = (1..=20).collect();
+        let e_mid: u64 = a.iter().sum::<u64>() / 2;
+        let exact = brute_force_w(&a, e_mid);
+
+        for k in &[1, 3, 5, 10, 15, 20] {
+            let lb = lookup_w(&a, e_mid, *k).unwrap();
+            assert!(
+                lb <= exact as u128,
+                "k={}: lookup={} > exact={}",
+                k,
+                lb,
+                exact
+            );
+        }
+    }
+
+    #[test]
+    fn test_lookup_monotone_in_k() {
+        let a: Vec<u64> = (1..=16).collect();
+        let e_mid: u64 = a.iter().sum::<u64>() / 2;
+
+        let mut prev = 0u128;
+        for k in 1..=a.len() {
+            let w = lookup_w(&a, e_mid, k).unwrap();
+            assert!(w >= prev, "k={}: {} < prev {}", k, w, prev);
+            prev = w;
+        }
+    }
+
+    #[test]
+    fn test_dp_matches_brute_force() {
+        let a: Vec<u64> = (1..=20).collect();
+        let n = a.len();
+
+        let mut w_exact: HashMap<u64, u64> = HashMap::new();
+        for mask in 0..(1u64 << n) {
+            let sum: u64 = (0..n).filter(|&j| mask & (1 << j) != 0).map(|j| a[j]).sum();
+            *w_exact.entry(sum).or_insert(0) += 1;
+        }
+
+        for (&e, &w) in &w_exact {
+            let dp = dp_w(&a, e, 1_000_000).unwrap();
+            assert_eq!(dp, w as u128, "E={}: brute={}, dp={}", e, w, dp);
+        }
+    }
+
+    #[test]
+    fn test_dp_gcd() {
+        let a: Vec<u64> = vec![10, 20, 30, 40];
+        assert_eq!(
+            dp_w(&a, 30, 1_000_000).unwrap(),
+            brute_force_w(&a, 30) as u128
+        );
+        assert_eq!(dp_w(&a, 15, 1_000_000).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_dp_too_large() {
+        let a: Vec<u64> = vec![1, 2];
+        assert!(dp_w(&a, 1, 2).is_none());
+    }
+
+    fn brute_signed(pos: &[u64], neg: &[u64], target: i64) -> u128 {
+        let mut total = 0u128;
+        let np = pos.len();
+        let nn = neg.len();
+        for sp in 0u32..(1 << np) {
+            let ss: i64 = (0..np)
+                .filter(|i| (sp >> i) & 1 == 1)
+                .map(|i| pos[i] as i64)
+                .sum();
+            for sn in 0u32..(1 << nn) {
+                let sn_sum: i64 = (0..nn)
+                    .filter(|j| (sn >> j) & 1 == 1)
+                    .map(|j| neg[j] as i64)
+                    .sum();
+                if ss - sn_sum == target {
+                    total += 1;
+                }
+            }
+        }
+        total
+    }
+
+    #[test]
+    fn test_lookup_w_signed_vs_brute() {
+        let pos: Vec<u64> = vec![1, 2, 3];
+        let neg: Vec<u64> = vec![1, 2];
+        for target in -3..=6 {
+            let brute = brute_signed(&pos, &neg, target);
+            let lw =
+                log_lookup_w_signed_target_aware(&pos, &neg, target, pos.len(), 1_000_000).unwrap();
+            let lookup: u128 = if lw.is_finite() {
+                lw.exp().round() as u128
+            } else {
+                0
+            };
+            assert_eq!(
+                brute, lookup,
+                "target={}: brute={} lookup={}",
+                target, brute, lookup
+            );
+        }
+    }
+
+    #[test]
+    fn test_lookup_w_signed_target_zero_has_empty_pair() {
+        let pos: Vec<u64> = vec![5, 7];
+        let neg: Vec<u64> = vec![3, 11];
+        let lw = log_lookup_w_signed_target_aware(&pos, &neg, 0, pos.len(), 1_000_000).unwrap();
+        assert!(
+            lw.is_finite(),
+            "expected at least the empty pair, got {}",
+            lw
+        );
+    }
+
+    #[test]
+    fn test_log_lookup_w_signed_zero_count_is_neg_inf() {
+        let pos: Vec<u64> = vec![1, 2];
+        let neg: Vec<u64> = vec![4];
+        let lw = log_lookup_w_signed_target_aware(&pos, &neg, -100, 2, 1_000_000).unwrap();
+        assert!(lw.is_infinite() && lw.is_sign_negative(), "got {}", lw);
+    }
+
+    #[test]
+    fn test_lookup_w_signed_target_aware_nonneg() {
+        let pos: Vec<u64> = vec![10, 20, 30];
+        let neg: Vec<u64> = vec![10, 20, 30];
+        let lw = log_lookup_w_signed_target_aware(&pos, &neg, 0, 3, 4_194_304).unwrap();
+        assert!(lw.is_finite(), "balanced multisets should have W >= 1");
+    }
+
+    #[test]
+    fn test_log_w_signed_adaptive_picks_best() {
+        let pos: Vec<u64> = vec![10, 20, 30];
+        let neg: Vec<u64> = vec![10, 20, 30];
+        let adaptive = log_w_signed_adaptive(&pos, &neg, 0, 3);
+        assert!(adaptive.is_some());
+        let pos_big: Vec<u64> = (1..=50).map(|i| i * 100).collect();
+        let neg_big: Vec<u64> = (1..=50).map(|i| i * 100).collect();
+        let adaptive_big = log_w_signed_adaptive(&pos_big, &neg_big, 0, 10);
+        assert!(adaptive_big.is_some());
+        assert!(adaptive_big.unwrap() > 0.0);
+    }
+}

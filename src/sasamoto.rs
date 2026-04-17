@@ -193,6 +193,7 @@ pub fn log_w_signed_sasamoto(positives: &[u64], negatives: &[u64], target: i64) 
 mod tests {
     use super::*;
     use crate::fixtures;
+    use crate::lookup::log_lookup_w_signed_target_aware;
 
     /// W(E) = C(N, E) when all aⱼ = 1 (paper §6, β = ln(N/E - 1)).
     #[test]
@@ -391,5 +392,25 @@ mod tests {
             result.unwrap() > 0.0,
             "balanced 200-coin set should have positive log W_signed"
         );
+    }
+
+    #[test]
+    fn test_log_w_signed_sasamoto_small_agrees_with_lookup() {
+        let pos: Vec<u64> = (10..=20).collect();
+        let neg: Vec<u64> = (10..=20).collect();
+        let target = 0i64;
+        let sas = log_w_signed_sasamoto(&pos, &neg, target);
+        let lookup = log_lookup_w_signed_target_aware(&pos, &neg, target, 11, 1_000_000);
+        if let (Some(s), Some(l)) = (sas, lookup) {
+            let diff = (s - l).abs();
+            eprintln!(
+                "Sasamoto signed={:.2}, lookup signed={:.2}, diff={:.2}",
+                s, l, diff
+            );
+            assert!(
+                diff < 5.0,
+                "Sasamoto and exact lookup should roughly agree for moderate N"
+            );
+        }
     }
 }
