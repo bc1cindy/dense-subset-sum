@@ -1,5 +1,6 @@
 //! Foundational types and shared helpers for W(E) subset-sum analysis.
 
+pub mod dense_region;
 pub mod fixtures;
 pub mod lookup;
 pub mod radix;
