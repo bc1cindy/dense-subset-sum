@@ -10,9 +10,10 @@ pub mod regime;
 pub mod sasamoto;
 pub mod stats;
 mod transaction;
+pub mod validation;
 
 pub use lookup::{dp_w, lookup_w};
-pub use regime::kappa;
+pub use regime::{kappa, kappa_c};
 pub use sasamoto::log_w_for_e_sat;
 pub use transaction::Transaction;
 
