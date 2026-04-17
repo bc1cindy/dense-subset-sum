@@ -1,0 +1,395 @@
+//! Sasamoto/Toyoizumi/Nishimori asymptotic W(E) via saddle-point (3.9, 3.10).
+//! arxiv:cond-mat/0106125. Unsound when W(E) < 1 (paper §3).
+
+use std::f64::consts::PI;
+
+/// Eq (3.2): ⟨E⟩ is strictly decreasing in β — enables bisection in `find_beta`.
+fn mean_energy(a: &[f64], beta: f64) -> f64 {
+    a.iter().map(|&aj| aj / (1.0 + (beta * aj).exp())).sum()
+}
+
+/// Eq (3.3): Var(E), second derivative of log Z, used in √(2π·Var) denominator of (3.9).
+fn variance_energy(a: &[f64], beta: f64) -> f64 {
+    a.iter()
+        .map(|&aj| {
+            let x = beta * aj;
+            aj * aj / ((1.0 + x.exp()) * (1.0 + (-x).exp()))
+        })
+        .sum()
+}
+
+/// Eq (3.9): log W(E) given β. Clamps at |βaⱼ| > 30 to avoid overflow.
+fn log_w(a: &[f64], beta: f64) -> f64 {
+    let sum_log: f64 = a
+        .iter()
+        .map(|&aj| {
+            let x = beta * aj;
+            if x > 30.0 {
+                (-x).exp()
+            } else if x < -30.0 {
+                -x
+            } else {
+                (1.0 + (-x).exp()).ln()
+            }
+        })
+        .sum();
+
+    let e_mean = mean_energy(a, beta);
+    let var_e = variance_energy(a, beta);
+    let log_num = sum_log + beta * e_mean;
+    let log_den = 0.5 * (2.0 * PI * var_e).ln();
+    log_num - log_den
+}
+
+/// Invert eq (3.10) via bisection on β ∈ [-200, 200]. None if e_target ∉ (0, Σaⱼ).
+fn find_beta(a: &[f64], e_target: f64, tol: f64) -> Option<f64> {
+    let e_max: f64 = a.iter().sum();
+    if e_target <= 0.0 || e_target >= e_max {
+        return None;
+    }
+
+    let mut lo = -200.0_f64;
+    let mut hi = 200.0_f64;
+    let f = |b: f64| mean_energy(a, b) - e_target;
+    if f(lo) < 0.0 || f(hi) > 0.0 {
+        return None;
+    }
+
+    for _ in 0..300 {
+        let mid = (lo + hi) / 2.0;
+        if (hi - lo) < tol {
+            return Some(mid);
+        }
+        if f(mid) > 0.0 {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    Some((lo + hi) / 2.0)
+}
+
+/// f64 interface: E → β via (3.10) → log W via (3.9).
+pub fn log_w_for_e(a: &[f64], e_target: f64) -> Option<f64> {
+    let beta = find_beta(a, e_target, 1e-12)?;
+    Some(log_w(a, beta))
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    let (mut a, mut b) = (a, b);
+    while b != 0 {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    a
+}
+
+pub(crate) fn gcd_slice(vals: &[u64]) -> u64 {
+    vals.iter().copied().fold(0, gcd)
+}
+
+/// u64 (satoshi) interface. GCD-normalizes to eliminate spurious saddle points (paper §3.6).
+/// Returns `Some(NEG_INFINITY)` when E is not divisible by GCD; `None` when E ∉ (0, Σaⱼ).
+pub fn log_w_for_e_sat(a: &[u64], e_target: u64) -> Option<f64> {
+    if a.is_empty() {
+        return None;
+    }
+
+    let g = gcd_slice(a);
+    if g == 0 {
+        return None;
+    }
+
+    if !e_target.is_multiple_of(g) {
+        return Some(f64::NEG_INFINITY);
+    }
+
+    let a_norm: Vec<f64> = a.iter().map(|&v| (v / g) as f64).collect();
+    let e_norm = (e_target / g) as f64;
+
+    log_w_for_e(&a_norm, e_norm)
+}
+
+/// Sasamoto `log W_signed(target)` via golden-section saddle search. O(N), scales to N ≫ sumset cap.
+///
+/// `eval` snaps `s` to the positives' GCD lattice, so the objective is a step function.
+/// Golden-section still converges on the plateau-of-maxima because `log_w_for_e_sat`
+/// is smooth between lattice points and the rounding is deterministic in `s`.
+pub fn log_w_signed_sasamoto(positives: &[u64], negatives: &[u64], target: i64) -> Option<f64> {
+    if positives.is_empty() || negatives.is_empty() {
+        return None;
+    }
+    let sum_pos: u64 = positives.iter().sum();
+    let sum_neg: u64 = negatives.iter().sum();
+
+    let gcd_pos = gcd_slice(positives).max(1);
+    let gcd_neg = gcd_slice(negatives).max(1);
+    let step = gcd_pos.max(gcd_neg) as f64;
+
+    let s_lo = target.max(0) as f64 + step;
+    let s_hi = ((sum_pos as f64) - step).min(sum_neg as f64 + target as f64 - step);
+    if s_lo >= s_hi {
+        return None;
+    }
+
+    let eval = |s: f64| -> f64 {
+        let s_pos_raw = s.round().max(1.0) as u64;
+        let s_pos = ((s_pos_raw + gcd_pos / 2) / gcd_pos) * gcd_pos;
+        let s_neg_i64 = s_pos as i64 - target;
+        if s_neg_i64 <= 0 {
+            return f64::NEG_INFINITY;
+        }
+        let s_neg_raw = s_neg_i64 as u64;
+        let s_neg = ((s_neg_raw + gcd_neg / 2) / gcd_neg) * gcd_neg;
+        if s_pos == 0 || s_pos >= sum_pos || s_neg == 0 || s_neg >= sum_neg {
+            return f64::NEG_INFINITY;
+        }
+        let lp = log_w_for_e_sat(positives, s_pos).unwrap_or(f64::NEG_INFINITY);
+        let ln = log_w_for_e_sat(negatives, s_neg).unwrap_or(f64::NEG_INFINITY);
+        lp + ln
+    };
+
+    let gr = (5.0_f64.sqrt() - 1.0) / 2.0;
+    let mut a = s_lo;
+    let mut b = s_hi;
+    let mut c = b - gr * (b - a);
+    let mut d = a + gr * (b - a);
+    let mut fc = eval(c);
+    let mut fd = eval(d);
+
+    for _ in 0..100 {
+        if (b - a).abs() < 1.0 {
+            break;
+        }
+        if fc < fd {
+            a = c;
+            c = d;
+            fc = fd;
+            d = a + gr * (b - a);
+            fd = eval(d);
+        } else {
+            b = d;
+            d = c;
+            fd = fc;
+            c = b - gr * (b - a);
+            fc = eval(c);
+        }
+    }
+
+    let best = fc.max(fd);
+    let at_lo = eval(s_lo);
+    let at_hi = eval(s_hi);
+    let result = best.max(at_lo).max(at_hi);
+
+    if result.is_finite() {
+        Some(result)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fixtures;
+
+    /// W(E) = C(N, E) when all aⱼ = 1 (paper §6, β = ln(N/E - 1)).
+    #[test]
+    fn test_binomial() {
+        let a = vec![1.0; 20];
+        fn binom(n: u64, k: u64) -> u64 {
+            (0..k).fold(1u64, |r, i| r * (n - i) / (i + 1))
+        }
+        for k in 1..20 {
+            let exact = binom(20, k) as f64;
+            let approx = log_w_for_e(&a, k as f64).unwrap().exp();
+            let err = (approx - exact).abs() / exact;
+            assert!(
+                err < 0.15,
+                "C(20,{})={}, got {:.1}, err={:.1}%",
+                k,
+                exact,
+                approx,
+                err * 100.0
+            );
+        }
+    }
+
+    #[test]
+    fn test_brute_force() {
+        let a: Vec<f64> = (1..=20).map(|i| i as f64).collect();
+        let n = a.len();
+        let e_max: f64 = a.iter().sum();
+
+        let mut w_exact = std::collections::HashMap::new();
+        for mask in 0..(1u64 << n) {
+            let sum: f64 = (0..n).filter(|&j| mask & (1 << j) != 0).map(|j| a[j]).sum();
+            *w_exact.entry(sum.round() as u64).or_insert(0u64) += 1;
+        }
+        assert_eq!(w_exact.values().sum::<u64>(), 1 << n);
+
+        let mut tested = 0;
+        for (&e, &w) in &w_exact {
+            if w < 100 {
+                continue;
+            }
+            let e_f = e as f64;
+            if e_f <= 0.0 || e_f >= e_max {
+                continue;
+            }
+            if let Some(lw) = log_w_for_e(&a, e_f) {
+                let err = (lw.exp() - w as f64).abs() / w as f64;
+                assert!(
+                    err < 0.20,
+                    "E={}: exact={}, approx={:.1}, err={:.1}%",
+                    e,
+                    w,
+                    lw.exp(),
+                    err * 100.0
+                );
+                tested += 1;
+            }
+        }
+        assert!(tested > 20);
+    }
+
+    #[test]
+    fn test_symmetry() {
+        let a = vec![3.0, 7.0, 11.0, 5.0, 9.0];
+        let emax: f64 = a.iter().sum();
+        let l1 = log_w_for_e(&a, 15.0).unwrap();
+        let l2 = log_w_for_e(&a, emax - 15.0).unwrap();
+        assert!((l1 - l2).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_no_overflow() {
+        let a: Vec<f64> = (1..=1000).map(|i| i as f64).collect();
+        let lw = log_w_for_e(&a, a.iter().sum::<f64>() / 2.0).unwrap();
+        assert!(lw.is_finite() && lw > 100.0);
+    }
+
+    /// "ratio of right and left hand sides tends to unity as N → ∞."
+    #[test]
+    fn test_convergence_with_n() {
+        fn peak_error(n: usize) -> f64 {
+            let a: Vec<f64> = (1..=n).map(|i| i as f64).collect();
+            let e_mid = a.iter().sum::<f64>() / 2.0;
+            let mut w_exact = 0u64;
+            for mask in 0..(1u64 << n) {
+                let sum: f64 = (0..n).filter(|&j| mask & (1 << j) != 0).map(|j| a[j]).sum();
+                if (sum - e_mid.round()).abs() < 0.5 {
+                    w_exact += 1;
+                }
+            }
+            let approx = log_w_for_e(&a, e_mid.round()).unwrap().exp();
+            (approx - w_exact as f64).abs() / w_exact as f64
+        }
+
+        let err_16 = peak_error(16);
+        let err_18 = peak_error(18);
+        let err_20 = peak_error(20);
+
+        assert!(
+            err_18 < err_16,
+            "err should decrease: 16={:.4} 18={:.4}",
+            err_16,
+            err_18
+        );
+        assert!(
+            err_20 < err_18,
+            "err should decrease: 18={:.4} 20={:.4}",
+            err_18,
+            err_20
+        );
+        assert!(err_20 < 0.05, "N=20 err={:.1}%, want <5%", err_20 * 100.0);
+    }
+
+    #[test]
+    fn test_gcd_normalization() {
+        let a_base: Vec<u64> = vec![3, 7, 11, 5, 9];
+        let a_scaled: Vec<u64> = a_base.iter().map(|&v| v * 100).collect();
+        let e_base: u64 = 15;
+        let e_scaled: u64 = 1500;
+
+        let lw_base = log_w_for_e_sat(&a_base, e_base).unwrap();
+        let lw_scaled = log_w_for_e_sat(&a_scaled, e_scaled).unwrap();
+        assert!(
+            (lw_base - lw_scaled).abs() < 1e-10,
+            "base={} scaled={}",
+            lw_base,
+            lw_scaled
+        );
+    }
+
+    #[test]
+    fn test_gcd_indivisible() {
+        let a: Vec<u64> = vec![10, 20, 30, 40];
+        let lw = log_w_for_e_sat(&a, 15).unwrap();
+        assert!(lw == f64::NEG_INFINITY, "expected -inf, got {}", lw);
+    }
+
+    #[test]
+    fn test_u64_vs_brute_force() {
+        let a: Vec<u64> = (1..=20).collect();
+        let n = a.len();
+        let e_max: u64 = a.iter().sum();
+
+        let mut w_exact = std::collections::HashMap::new();
+        for mask in 0..(1u64 << n) {
+            let sum: u64 = (0..n).filter(|&j| mask & (1 << j) != 0).map(|j| a[j]).sum();
+            *w_exact.entry(sum).or_insert(0u64) += 1;
+        }
+
+        let mut tested = 0;
+        for (&e, &w) in &w_exact {
+            if w < 100 || e == 0 || e >= e_max {
+                continue;
+            }
+            if let Some(lw) = log_w_for_e_sat(&a, e) {
+                let err = (lw.exp() - w as f64).abs() / w as f64;
+                assert!(
+                    err < 0.20,
+                    "E={}: exact={}, approx={:.1}, err={:.1}%",
+                    e,
+                    w,
+                    lw.exp(),
+                    err * 100.0
+                );
+                tested += 1;
+            }
+        }
+        assert!(tested > 20);
+    }
+
+    #[test]
+    fn test_log_w_for_e_sat_empty_returns_none() {
+        assert!(log_w_for_e_sat(&[], 10).is_none());
+    }
+
+    #[test]
+    fn test_log_w_for_e_sat_all_zeros_returns_none() {
+        assert!(log_w_for_e_sat(&[0, 0, 0], 0).is_none());
+    }
+
+    #[test]
+    fn test_equal_denominations_gcd() {
+        let tx = fixtures::equal_denominations();
+        assert_eq!(tx.fee(), Some(0));
+        let all_values: Vec<u64> = tx.inputs.iter().chain(tx.outputs.iter()).copied().collect();
+        assert_eq!(gcd_slice(&all_values), 50_000);
+    }
+
+    #[test]
+    fn test_log_w_signed_sasamoto_large_n_finite() {
+        let pos: Vec<u64> = (1..=100).map(|i| i * 1000).collect();
+        let neg: Vec<u64> = (1..=100).map(|i| i * 1000).collect();
+        let result = log_w_signed_sasamoto(&pos, &neg, 0);
+        assert!(result.is_some(), "Sasamoto should work for 200 coins");
+        assert!(
+            result.unwrap() > 0.0,
+            "balanced 200-coin set should have positive log W_signed"
+        );
+    }
+}
