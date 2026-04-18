@@ -23,7 +23,7 @@ impl Transaction {
         self.input_sum().checked_sub(self.output_sum())
     }
 
-    pub fn n_coins(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.inputs.len() + self.outputs.len()
     }
 }
