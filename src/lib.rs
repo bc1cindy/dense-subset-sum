@@ -5,6 +5,7 @@ pub mod comparison;
 pub mod dense_region;
 pub mod fixtures;
 pub mod lookup;
+pub mod loss;
 pub mod mappings;
 pub mod radix;
 pub mod regime;
@@ -14,11 +15,14 @@ mod transaction;
 pub mod validation;
 
 pub use lookup::{
-    dp_w, log_lookup_w, log_lookup_w_signed_target_aware, log_w_signed_adaptive, lookup_w,
-    sumset_cap,
+    dp_w, log_dp_w, log_lookup_w, log_lookup_w_signed_target_aware, log_w_signed_adaptive,
+    lookup_w, sumset_cap,
 };
-pub use radix::is_radix_like_in_base;
-pub use regime::{kappa, kappa_c};
+pub use radix::{
+    arbitrary_distinctness_log2, best_radix_base, coverage_bonus_log2, denomination_reward_log2,
+    distinguish_coins, is_radix_like_any_base, is_radix_like_in_base,
+};
+pub use regime::{density_regime, kappa, kappa_c};
 pub use sasamoto::{log_w_for_e_sat, log_w_signed_sasamoto};
 pub use transaction::Transaction;
 
