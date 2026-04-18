@@ -19,8 +19,8 @@ impl Transaction {
         self.outputs.iter().sum()
     }
 
-    pub fn fee(&self) -> Option<u64> {
-        self.input_sum().checked_sub(self.output_sum())
+    pub fn fee(&self) -> u64 {
+        self.input_sum() - self.output_sum()
     }
 
     pub fn len(&self) -> usize {
