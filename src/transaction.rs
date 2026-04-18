@@ -1,4 +1,3 @@
-//! CoinJoin transaction in satoshis.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Transaction {
