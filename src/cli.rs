@@ -1,0 +1,512 @@
+//! Clap definitions and dispatcher. `main.rs` only parses and calls [`run`].
+
+use clap::{Parser, Subcommand};
+
+use crate::commands::{
+    cmd_analyze_tx, cmd_calibrate_privacy, cmd_coin_scores, cmd_compare, cmd_compare_empirical,
+    cmd_compare_fixtures, cmd_compare_random, cmd_compare_synthetic, cmd_compare_wasabi2, cmd_cost,
+    cmd_dense_boundary, cmd_density, cmd_density_scan, cmd_estimate, cmd_full_report, cmd_kappa,
+    cmd_marginal_score, cmd_subset_density, cmd_suggest_split, cmd_validate,
+};
+
+#[derive(Parser)]
+#[command(
+    name = "dense-subset-sum",
+    about = "Subset sum density analysis for CoinJoin privacy",
+    after_help = "See README.md for quick-start commands and interpretation guide."
+)]
+pub struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Scan W(E) across the energy range for a set of values
+    DensityScan {
+        /// Comma-separated values
+        #[arg(short, long)]
+        values: String,
+        /// Number of scan points
+        #[arg(short, long, default_value = "20")]
+        steps: usize,
+        /// Minimum log W threshold for dense region
+        #[arg(short, long, default_value = "2.3")]
+        min_log_w: f64,
+    },
+    /// Enumerate mappings and compute Boltzmann metrics for a transaction
+    AnalyzeTx {
+        /// Comma-separated input values (satoshis)
+        #[arg(short, long)]
+        inputs: String,
+        /// Comma-separated output values (satoshis)
+        #[arg(short, long)]
+        outputs: String,
+    },
+    /// Estimate W(E) using Sasamoto + lookup table
+    Estimate {
+        /// Comma-separated input values (satoshis)
+        #[arg(short, long)]
+        inputs: String,
+        /// Comma-separated output values (satoshis)
+        #[arg(short, long)]
+        outputs: String,
+        /// Block size for lookup table
+        #[arg(short = 'k', long, default_value = "15")]
+        block_size: usize,
+    },
+    /// Cross-validate estimators against brute force
+    Validate {
+        /// Comma-separated values
+        #[arg(short, long)]
+        values: String,
+        /// Minimum W for test points
+        #[arg(short, long, default_value = "10")]
+        min_w: u64,
+        /// Block size for lookup table
+        #[arg(short = 'k', long, default_value = "10")]
+        block_size: usize,
+    },
+    /// Compute κ and κ_c for a set of values
+    Kappa {
+        /// Comma-separated values
+        #[arg(short, long)]
+        values: String,
+        /// Target energy (optional, for κ_c computation)
+        #[arg(short, long)]
+        target: Option<u64>,
+    },
+    /// Compute the privacy cost/score for a transaction
+    Cost {
+        /// Comma-separated input values (satoshis)
+        #[arg(short, long)]
+        inputs: String,
+        /// Comma-separated output values (satoshis)
+        #[arg(short, long)]
+        outputs: String,
+        /// Block size for lookup table
+        #[arg(short = 'k', long, default_value = "15")]
+        block_size: usize,
+    },
+    /// Compare W estimators against brute force for given values
+    Compare {
+        /// Comma-separated values
+        #[arg(short, long)]
+        values: String,
+        /// Minimum W for test points
+        #[arg(short, long, default_value = "5")]
+        min_w: u64,
+        /// Block size for lookup table
+        #[arg(short = 'k', long, default_value = "10")]
+        block_size: usize,
+        /// Output as CSV
+        #[arg(long)]
+        csv: bool,
+    },
+    /// Run comparison on all built-in fixtures
+    CompareFixtures {
+        /// Minimum W for test points
+        #[arg(short, long, default_value = "5")]
+        min_w: u64,
+        /// Block size for lookup table
+        #[arg(short = 'k', long, default_value = "10")]
+        block_size: usize,
+    },
+    /// Compare estimators on random uniform values
+    CompareRandom {
+        /// Number of values
+        #[arg(short, long, default_value = "16")]
+        n: usize,
+        /// Maximum value (uniform range [1, max_val])
+        #[arg(short, long, default_value = "1000")]
+        max_val: u64,
+        /// Random seed
+        #[arg(short, long, default_value = "42")]
+        seed: u64,
+        /// Minimum W for test points
+        #[arg(short = 'w', long, default_value = "10")]
+        min_w: u64,
+        /// Block size for lookup table
+        #[arg(short = 'k', long, default_value = "10")]
+        block_size: usize,
+        /// Run full matrix (overrides n/max_val/seed)
+        #[arg(long)]
+        matrix: bool,
+    },
+    /// Compare W estimates vs CJA mappings for real Wasabi 2 transactions
+    CompareWasabi2 {
+        /// Max total coins for CJA enumeration (default 26)
+        #[arg(short, long, default_value = "26")]
+        max_coins: usize,
+        /// Block size for lookup table
+        #[arg(short = 'k', long, default_value = "10")]
+        block_size: usize,
+        /// "phantom" (Maurer canonical fee-as-output) or "signed" (signed W on fee).
+        #[arg(long, default_value = "phantom")]
+        fee_handling: String,
+    },
+    /// Per-coin W estimates (signed ±multiset probe) for every input and output.
+    CoinScores {
+        /// Wasabi2 fixture label (e.g. w2_6a6dcc22_17in6out). Overrides --inputs/--outputs.
+        #[arg(long)]
+        tx_label: Option<String>,
+        /// Path to JSON file: {"label":..., "inputs":[...], "outputs":[...]}. Overrides --tx-label.
+        #[arg(long)]
+        tx_json: Option<std::path::PathBuf>,
+        /// Comma-separated input values (satoshis). Ignored if --tx-label given.
+        #[arg(short, long, default_value = "")]
+        inputs: String,
+        /// Comma-separated output values (satoshis). Ignored if --tx-label given.
+        #[arg(short, long, default_value = "")]
+        outputs: String,
+        /// Block size for lookup table
+        #[arg(short = 'k', long, default_value = "10")]
+        block_size: usize,
+    },
+    /// Random-subset density sweep: fraction of subsets with κ < κ_c per size.
+    SubsetDensity {
+        /// Wasabi2 fixture label (e.g. w2_37e11e3f_159in3out). Overrides --values.
+        #[arg(long)]
+        tx_label: Option<String>,
+        /// Path to JSON tx file. Uses tx.inputs (or inputs+outputs if --all-coins).
+        #[arg(long)]
+        tx_json: Option<std::path::PathBuf>,
+        /// Comma-separated values. Ignored if --tx-label given.
+        #[arg(short, long, default_value = "")]
+        values: String,
+        /// Use all coins (inputs+outputs) of the fixture, not just inputs.
+        #[arg(long, default_value = "false")]
+        all_coins: bool,
+        /// Comma-separated subset sizes (defaults to 4,8,16,32,64,... up to N).
+        #[arg(long)]
+        sizes: Option<String>,
+        /// Number of random subsets per size.
+        #[arg(long, default_value = "200")]
+        samples: usize,
+        /// Random seed.
+        #[arg(long, default_value = "42")]
+        seed: u64,
+    },
+    /// Spearman correlation: cheap estimators vs Boltzmann ground truth (log |M_non_derived|).
+    CalibratePrivacy {
+        #[arg(long, default_value = "26")]
+        max_coins: usize,
+        #[arg(short = 'k', long, default_value = "10")]
+        block_size: usize,
+    },
+    /// Dense target range [E_lo, E_hi], fraction of [0,Σa] dense, and k* crossover.
+    DenseBoundary {
+        #[arg(long)]
+        tx_label: Option<String>,
+        /// Path to JSON tx file. Overrides --tx-label.
+        #[arg(long)]
+        tx_json: Option<std::path::PathBuf>,
+        #[arg(short, long, default_value = "")]
+        inputs: String,
+        #[arg(short, long, default_value = "")]
+        outputs: String,
+        #[arg(long, default_value = "200")]
+        samples: usize,
+        #[arg(long, default_value = "42")]
+        seed: u64,
+    },
+    /// Kitchen-sink report: every estimator side-by-side on a single transaction.
+    FullReport {
+        /// Wasabi2 fixture label (positive or negative). Overrides --inputs/--outputs.
+        #[arg(long)]
+        tx_label: Option<String>,
+        /// Path to JSON file: {"label":..., "inputs":[...], "outputs":[...]}. Overrides --tx-label.
+        #[arg(long)]
+        tx_json: Option<std::path::PathBuf>,
+        /// Comma-separated input values (satoshis). Ignored if --tx-label given.
+        #[arg(short, long, default_value = "")]
+        inputs: String,
+        /// Comma-separated output values (satoshis). Ignored if --tx-label given.
+        #[arg(short, long, default_value = "")]
+        outputs: String,
+        /// Block size for lookup table.
+        #[arg(short = 'k', long, default_value = "10")]
+        block_size: usize,
+    },
+    /// Unified density API: 3-tier scale switch (exact DP → lookup → Sasamoto).
+    Density {
+        /// Wasabi2 fixture label (uses tx.inputs). Overrides --values.
+        #[arg(long)]
+        tx_label: Option<String>,
+        /// Path to JSON tx file. Uses tx.inputs. Overrides --tx-label.
+        #[arg(long)]
+        tx_json: Option<std::path::PathBuf>,
+        /// Comma-separated values (satoshis). Ignored if --tx-label given.
+        #[arg(short, long, default_value = "")]
+        values: String,
+        /// Target energy E (subset sum). Defaults to Σvalues / 2.
+        #[arg(short, long)]
+        target: Option<u64>,
+        /// Block size for lookup table.
+        #[arg(short = 'k', long, default_value = "15")]
+        block_size: usize,
+    },
+    /// Compare estimators on empirical Bitcoin UTXO distribution
+    CompareEmpirical {
+        /// Number of values. N>25 triggers Monte Carlo sampling in place of exhaustive enumeration.
+        #[arg(short, long, default_value = "16")]
+        n: usize,
+        /// Random seed
+        #[arg(short, long, default_value = "42")]
+        seed: u64,
+        /// Minimum W (exhaustive) or minimum observed count (Monte Carlo) for test points.
+        #[arg(short = 'w', long, default_value = "5")]
+        min_w: u64,
+        /// Block size for lookup table
+        #[arg(short = 'k', long, default_value = "10")]
+        block_size: usize,
+        /// Path to CJA `distribution.bin` (fetch via scripts/fetch_cja_distribution.sh).
+        #[arg(long)]
+        bin: Option<std::path::PathBuf>,
+        /// Divisor applied to each sampled value. Needed at sat scale where sub-sums are unique.
+        #[arg(long, default_value = "1")]
+        divisor: u64,
+        /// Monte Carlo sample count (only used when N > 25).
+        #[arg(long, default_value = "1000000")]
+        samples: u64,
+        /// Monte Carlo timeout in milliseconds (only used when N > 25).
+        #[arg(long, default_value = "60000")]
+        timeout_ms: u64,
+    },
+    /// Sasamoto vs DP ground truth on synthetic uniform inputs at large N.
+    CompareSynthetic {
+        /// Number of values. N≥100 slows because Lookup scales as N·Σa.
+        #[arg(short, long, default_value = "50")]
+        n: usize,
+        /// Values drawn uniformly from [1, l_max].
+        #[arg(long, default_value = "500")]
+        l_max: u64,
+        /// Random seed.
+        #[arg(short, long, default_value = "42")]
+        seed: u64,
+        /// Minimum W for included test points.
+        #[arg(short = 'w', long, default_value = "100")]
+        min_w: u64,
+        /// Block size for lookup table.
+        #[arg(short = 'k', long, default_value = "10")]
+        block_size: usize,
+        /// Max DP table size (Σa must fit). Default 10M cells ≈ 160 MB u128.
+        #[arg(long, default_value = "10000000")]
+        dp_max: usize,
+    },
+    /// Should I add UTXOs to this co-spend? Reports before/after/delta on signed log₂W.
+    MarginalScore {
+        /// Wasabi2 fixture label for the current tx. Overrides --inputs/--outputs.
+        #[arg(long)]
+        tx_label: Option<String>,
+        /// JSON file: {"label":..., "inputs":[...], "outputs":[...]} for the current tx.
+        #[arg(long)]
+        tx_json: Option<std::path::PathBuf>,
+        /// Current tx inputs (satoshis). Ignored if --tx-label/--tx-json given.
+        #[arg(short, long, default_value = "")]
+        inputs: String,
+        /// Current tx outputs (satoshis). Ignored if --tx-label/--tx-json given.
+        #[arg(short, long, default_value = "")]
+        outputs: String,
+        /// Inputs you are considering adding (satoshis, comma-separated).
+        #[arg(long, default_value = "")]
+        new_inputs: String,
+        /// Outputs you are considering adding (satoshis, comma-separated).
+        #[arg(long, default_value = "")]
+        new_outputs: String,
+        /// Block size for lookup table in the signed scoring probe.
+        #[arg(short = 'k', long, default_value = "10")]
+        block_size: usize,
+    },
+    /// Low-Hamming-weight change decomposition that maximizes mean signed log₂W.
+    SuggestSplit {
+        /// Comma-separated input values (satoshis).
+        #[arg(short, long)]
+        inputs: String,
+        /// Comma-separated output values, EXCLUDING the change being split.
+        #[arg(short, long)]
+        outputs: String,
+        /// Change amount to decompose (satoshis).
+        #[arg(short, long)]
+        change: u64,
+        /// Maximum number of pieces in the split (1..=8).
+        #[arg(short = 'p', long, default_value = "4")]
+        max_pieces: usize,
+        /// Block size for lookup table in the signed scoring probe.
+        #[arg(short = 'k', long, default_value = "3")]
+        block_size: usize,
+    },
+}
+
+pub fn run(cli: Cli) {
+    match cli.command {
+        Command::DensityScan {
+            values,
+            steps,
+            min_log_w,
+        } => cmd_density_scan(&values, steps, min_log_w),
+        Command::AnalyzeTx { inputs, outputs } => cmd_analyze_tx(&inputs, &outputs),
+        Command::Estimate {
+            inputs,
+            outputs,
+            block_size,
+        } => cmd_estimate(&inputs, &outputs, block_size),
+        Command::Validate {
+            values,
+            min_w,
+            block_size,
+        } => cmd_validate(&values, min_w, block_size),
+        Command::Kappa { values, target } => cmd_kappa(&values, target),
+        Command::Cost {
+            inputs,
+            outputs,
+            block_size,
+        } => cmd_cost(&inputs, &outputs, block_size),
+        Command::Compare {
+            values,
+            min_w,
+            block_size,
+            csv,
+        } => cmd_compare(&values, min_w, block_size, csv),
+        Command::CompareFixtures { min_w, block_size } => cmd_compare_fixtures(min_w, block_size),
+        Command::CompareRandom {
+            n,
+            max_val,
+            seed,
+            min_w,
+            block_size,
+            matrix,
+        } => cmd_compare_random(n, max_val, seed, min_w, block_size, matrix),
+        Command::CompareWasabi2 {
+            max_coins,
+            block_size,
+            fee_handling,
+        } => cmd_compare_wasabi2(max_coins, block_size, &fee_handling),
+        Command::CoinScores {
+            tx_label,
+            tx_json,
+            inputs,
+            outputs,
+            block_size,
+        } => cmd_coin_scores(
+            tx_label.as_deref(),
+            tx_json.as_deref(),
+            &inputs,
+            &outputs,
+            block_size,
+        ),
+        Command::SubsetDensity {
+            tx_label,
+            tx_json,
+            values,
+            all_coins,
+            sizes,
+            samples,
+            seed,
+        } => cmd_subset_density(
+            tx_label.as_deref(),
+            tx_json.as_deref(),
+            &values,
+            all_coins,
+            sizes.as_deref(),
+            samples,
+            seed,
+        ),
+        Command::CompareEmpirical {
+            n,
+            seed,
+            min_w,
+            block_size,
+            bin,
+            divisor,
+            samples,
+            timeout_ms,
+        } => cmd_compare_empirical(
+            n,
+            seed,
+            min_w,
+            block_size,
+            bin.as_deref(),
+            divisor,
+            samples,
+            timeout_ms,
+        ),
+        Command::CompareSynthetic {
+            n,
+            l_max,
+            seed,
+            min_w,
+            block_size,
+            dp_max,
+        } => cmd_compare_synthetic(n, l_max, seed, min_w, block_size, dp_max),
+        Command::MarginalScore {
+            tx_label,
+            tx_json,
+            inputs,
+            outputs,
+            new_inputs,
+            new_outputs,
+            block_size,
+        } => cmd_marginal_score(
+            tx_label.as_deref(),
+            tx_json.as_deref(),
+            &inputs,
+            &outputs,
+            &new_inputs,
+            &new_outputs,
+            block_size,
+        ),
+        Command::SuggestSplit {
+            inputs,
+            outputs,
+            change,
+            max_pieces,
+            block_size,
+        } => cmd_suggest_split(&inputs, &outputs, change, max_pieces, block_size),
+        Command::CalibratePrivacy {
+            max_coins,
+            block_size,
+        } => cmd_calibrate_privacy(max_coins, block_size),
+        Command::DenseBoundary {
+            tx_label,
+            tx_json,
+            inputs,
+            outputs,
+            samples,
+            seed,
+        } => cmd_dense_boundary(
+            tx_label.as_deref(),
+            tx_json.as_deref(),
+            &inputs,
+            &outputs,
+            samples,
+            seed,
+        ),
+        Command::FullReport {
+            tx_label,
+            tx_json,
+            inputs,
+            outputs,
+            block_size,
+        } => cmd_full_report(
+            tx_label.as_deref(),
+            tx_json.as_deref(),
+            &inputs,
+            &outputs,
+            block_size,
+        ),
+        Command::Density {
+            tx_label,
+            tx_json,
+            values,
+            target,
+            block_size,
+        } => cmd_density(
+            tx_label.as_deref(),
+            tx_json.as_deref(),
+            &values,
+            target,
+            block_size,
+        ),
+    }
+}

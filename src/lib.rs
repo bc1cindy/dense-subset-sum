@@ -14,16 +14,18 @@ pub mod stats;
 mod transaction;
 pub mod validation;
 
+pub use dense_region::find_dense_region;
 pub use lookup::{
-    dp_w, log_dp_w, log_lookup_w, log_lookup_w_signed_target_aware, log_w_signed_adaptive,
-    lookup_w, sumset_cap,
+    brute_force_w, dp_w, log_dp_w, log_lookup_w, log_lookup_w_signed_target_aware,
+    log_w_signed_adaptive, lookup_w, sumset_cap,
 };
 pub use radix::{
-    arbitrary_distinctness_log2, best_radix_base, coverage_bonus_log2, denomination_reward_log2,
-    distinguish_coins, is_radix_like_any_base, is_radix_like_in_base,
+    RADIX_BASES, arbitrary_distinctness_log2, best_radix_base, coverage_bonus_log2,
+    denomination_multiplicities, denomination_reward_log2, distinguish_coins,
+    is_radix_like_any_base, is_radix_like_in_base,
 };
 pub use regime::{density_regime, kappa, kappa_c};
-pub use sasamoto::{log_w_for_e_sat, log_w_signed_sasamoto};
+pub use sasamoto::{log_w_for_e, log_w_for_e_sat, log_w_signed_sasamoto};
 pub use transaction::Transaction;
 
 pub(crate) use sasamoto::gcd_slice;
