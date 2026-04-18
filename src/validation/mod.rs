@@ -1,11 +1,41 @@
 //! Cross-validation of estimators against brute force and CJA mappings.
 
 mod density_sweep;
+mod per_coin;
 
 pub use density_sweep::{SubsetDensityPoint, print_subset_density_sweep, subset_density_sweep};
+pub use per_coin::{
+    CoinRole, CoinScore, per_coin_scores_signed, per_coin_scores_signed_fee_aware,
+    print_per_coin_scores,
+};
+
+pub(super) fn exclude_values(full: &[u64], to_remove: &[u64]) -> Vec<u64> {
+    let mut remaining = full.to_vec();
+    for &val in to_remove {
+        if let Some(pos) = remaining.iter().position(|&v| v == val) {
+            remaining.swap_remove(pos);
+        }
+    }
+    remaining
+}
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn test_exclude_values() {
+        let full = vec![10, 20, 10, 30, 10];
+        let remove = vec![10, 10];
+        let remaining = exclude_values(&full, &remove);
+        assert_eq!(remaining.len(), 3);
+        assert_eq!(
+            remaining.iter().filter(|&&v| v == 10).count(),
+            1,
+            "should remove exactly 2 of 3 tens"
+        );
+    }
+
     #[test]
     fn test_compare_estimators_n20() {
         let a: Vec<u64> = (1..=20).collect();
