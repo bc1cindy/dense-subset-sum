@@ -1,10 +1,16 @@
 //! Cross-validation of estimators against brute force and CJA mappings.
 
 mod density_sweep;
+mod mappings_pipeline;
 mod per_coin;
 mod sub_tx_estimates;
 
 pub use density_sweep::{SubsetDensityPoint, print_subset_density_sweep, subset_density_sweep};
+pub use mappings_pipeline::{
+    FeeHandling, MappingComparison, MappingCorrelation, ValidationSummary, compare_w_vs_mappings,
+    compare_w_vs_mappings_with, correlate_w_vs_mappings, print_mapping_comparison,
+    print_mapping_correlation, print_mapping_summary, validate_estimators,
+};
 pub use per_coin::{
     CoinRole, CoinScore, per_coin_scores_signed, per_coin_scores_signed_fee_aware,
     print_per_coin_scores,
