@@ -2,12 +2,14 @@
 
 mod density_sweep;
 mod per_coin;
+mod sub_tx_estimates;
 
 pub use density_sweep::{SubsetDensityPoint, print_subset_density_sweep, subset_density_sweep};
 pub use per_coin::{
     CoinRole, CoinScore, per_coin_scores_signed, per_coin_scores_signed_fee_aware,
     print_per_coin_scores,
 };
+pub use sub_tx_estimates::{SubTxEstimate, estimate_sub_txs};
 
 pub(super) fn exclude_values(full: &[u64], to_remove: &[u64]) -> Vec<u64> {
     let mut remaining = full.to_vec();
