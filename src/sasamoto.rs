@@ -1,96 +1,37 @@
-//! Sasamoto/Toyoizumi/Nishimori asymptotic W(E) via saddle-point (3.9, 3.10).
-//! arxiv:cond-mat/0106125. Unsound when W(E) < 1 (paper §3).
+//! Sasamoto/Toyoizumi/Nishimori asymptotic W(E) via saddle-point.
+//!
+//! W(E) = #{S ⊆ A : ΣS = E}, the number of subsets of A summing to E.
+//! Exact evaluation is #P-complete. This module implements the O(N)
+//! asymptotic formula (eq 3.9) from:
+//!
+//!   Sasamoto, Toyoizumi, Nishimori,
+//!   "Statistical Mechanics of an NP-complete Problem: Subset Sum",
+//!   arxiv:cond-mat/0106125
+//!
+//! Output is in log space: W(E) reaches 2^N and overflows f64 past
+//! N ≈ 1024. Unsound when W(E) < 1 (paper §3); callers gate use by
+//! density regime before dispatching here.
 
 use std::f64::consts::PI;
 
-/// Eq (3.2): ⟨E⟩ is strictly decreasing in β — enables bisection in `find_beta`.
-fn mean_energy(a: &[f64], beta: f64) -> f64 {
-    a.iter().map(|&aj| aj / (1.0 + (beta * aj).exp())).sum()
-}
-
-/// Eq (3.3): Var(E), second derivative of log Z, used in √(2π·Var) denominator of (3.9).
-fn variance_energy(a: &[f64], beta: f64) -> f64 {
-    a.iter()
-        .map(|&aj| {
-            let x = beta * aj;
-            aj * aj / ((1.0 + x.exp()) * (1.0 + (-x).exp()))
-        })
-        .sum()
-}
-
-/// Eq (3.9): log W(E) given β. Clamps at |βaⱼ| > 30 to avoid overflow.
-fn log_w(a: &[f64], beta: f64) -> f64 {
-    let sum_log: f64 = a
-        .iter()
-        .map(|&aj| {
-            let x = beta * aj;
-            if x > 30.0 {
-                (-x).exp()
-            } else if x < -30.0 {
-                -x
-            } else {
-                (1.0 + (-x).exp()).ln()
-            }
-        })
-        .sum();
-
-    let e_mean = mean_energy(a, beta);
-    let var_e = variance_energy(a, beta);
-    let log_num = sum_log + beta * e_mean;
-    let log_den = 0.5 * (2.0 * PI * var_e).ln();
-    log_num - log_den
-}
-
-/// Invert eq (3.10) via bisection on β ∈ [-200, 200]. None if e_target ∉ (0, Σaⱼ).
-fn find_beta(a: &[f64], e_target: f64, tol: f64) -> Option<f64> {
-    let e_max: f64 = a.iter().sum();
-    if e_target <= 0.0 || e_target >= e_max {
-        return None;
-    }
-
-    let mut lo = -200.0_f64;
-    let mut hi = 200.0_f64;
-    let f = |b: f64| mean_energy(a, b) - e_target;
-    if f(lo) < 0.0 || f(hi) > 0.0 {
-        return None;
-    }
-
-    for _ in 0..300 {
-        let mid = (lo + hi) / 2.0;
-        if (hi - lo) < tol {
-            return Some(mid);
-        }
-        if f(mid) > 0.0 {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    Some((lo + hi) / 2.0)
-}
-
-/// f64 interface: E → β via (3.10) → log W via (3.9).
+/// Public entry (f64): target energy E → saddle β (3.10) → log W(E) (3.9).
+///
+/// Returns log W, not W. The paper states (3.9) in linear form, but W grows
+/// like 2^N near the midpoint of Σaⱼ and overflows f64 past N ≈ 1024. Log
+/// space also has far better relative precision for the large values this
+/// estimator is designed to produce, which is what callers consume.
 pub fn log_w_for_e(a: &[f64], e_target: f64) -> Option<f64> {
     let beta = find_beta(a, e_target, 1e-12)?;
     Some(log_w(a, beta))
 }
 
-fn gcd(a: u64, b: u64) -> u64 {
-    let (mut a, mut b) = (a, b);
-    while b != 0 {
-        let t = b;
-        b = a % b;
-        a = t;
-    }
-    a
-}
-
-pub(crate) fn gcd_slice(vals: &[u64]) -> u64 {
-    vals.iter().copied().fold(0, gcd)
-}
-
-/// u64 (satoshi) interface. GCD-normalizes to eliminate spurious saddle points (paper §3.6).
-/// Returns `Some(NEG_INFINITY)` when E is not divisible by GCD; `None` when E ∉ (0, Σaⱼ).
+/// Public entry (u64/satoshi): GCD-normalizes A and E, then calls (3.9).
+///
+/// Paper assumes gcd(A) = 1 (note after eq 3.6: otherwise extra saddles of
+/// equal order appear and (3.9) misses their contribution). Dividing A and E
+/// by gcd(A) restores the assumption on real inputs where it rarely holds
+/// (e.g. satoshi amounts in multiples of 1000). E not a multiple of gcd(A)
+/// has no solution → NEG_INFINITY. None if E ∉ (0, Σaⱼ) or A empty/all-zero.
 pub fn log_w_for_e_sat(a: &[u64], e_target: u64) -> Option<f64> {
     if a.is_empty() {
         return None;
@@ -111,11 +52,19 @@ pub fn log_w_for_e_sat(a: &[u64], e_target: u64) -> Option<f64> {
     log_w_for_e(&a_norm, e_norm)
 }
 
-/// Sasamoto `log W_signed(target)` via golden-section saddle search. O(N), scales to N ≫ sumset cap.
+/// Sasamoto estimator for the signed probe: log W_signed(target) in O(N).
 ///
-/// `eval` snaps `s` to the positives' GCD lattice, so the objective is a step function.
-/// Golden-section still converges on the plateau-of-maxima because `log_w_for_e_sat`
-/// is smooth between lattice points and the rounding is deterministic in `s`.
+/// W_signed(target) = #{(S ⊆ pos, T ⊆ neg) : ΣS − ΣT = target}. Used when
+/// either side alone is too small for (3.9) to be reliable, but the combined
+/// ±multiset is large enough. Decomposes as
+///   log W_signed(target) = max_s [log W_pos(s) + log W_neg(s − target)]
+/// and golden-section searches over s. Both inner calls go through (3.9) via
+/// `log_w_for_e_sat`.
+///
+/// `s` is snapped to max(gcd_pos, gcd_neg) so both inner calls stay on their
+/// valid GCD lattice (see `log_w_for_e_sat`); the objective becomes a step
+/// function, but the snapping is deterministic so golden-section still
+/// converges to the plateau maximum.
 pub fn log_w_signed_sasamoto(positives: &[u64], negatives: &[u64], target: i64) -> Option<f64> {
     if positives.is_empty() || negatives.is_empty() {
         return None;
@@ -187,6 +136,96 @@ pub fn log_w_signed_sasamoto(positives: &[u64], negatives: &[u64], target: i64) 
     } else {
         None
     }
+}
+
+pub(crate) fn gcd_slice(vals: &[u64]) -> u64 {
+    vals.iter().copied().fold(0, gcd)
+}
+
+/// Solves (3.10) for β given target E: finds the saddle around which (3.9)
+/// is evaluated. Bisection works because ⟨E⟩(β) is strictly monotone (3.2).
+///
+/// β ∈ [-200, 200]: far wider than needed; for any realistic subset-sum input
+/// |β| saturates long before. None if E ∉ (0, Σaⱼ) (no valid saddle).
+fn find_beta(a: &[f64], e_target: f64, tol: f64) -> Option<f64> {
+    let e_max: f64 = a.iter().sum();
+    if e_target <= 0.0 || e_target >= e_max {
+        return None;
+    }
+
+    let mut lo = -200.0_f64;
+    let mut hi = 200.0_f64;
+    let f = |b: f64| mean_energy(a, b) - e_target;
+    if f(lo) < 0.0 || f(hi) > 0.0 {
+        return None;
+    }
+
+    for _ in 0..300 {
+        let mid = (lo + hi) / 2.0;
+        if (hi - lo) < tol {
+            return Some(mid);
+        }
+        if f(mid) > 0.0 {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    Some((lo + hi) / 2.0)
+}
+
+/// Eq (3.9): log W(E) = Σ log(1+e^{-βaⱼ}) + β⟨E⟩ − ½ log(2π·Var).
+///
+/// The |βaⱼ| > 30 branches are numerically-stable approximations of log(1+e^{-x}):
+/// e^{-x} for x ≫ 0 and -x for x ≪ 0. Without them, `exp(±βaⱼ)` overflows
+/// and the analytic limit is lost to NaN.
+fn log_w(a: &[f64], beta: f64) -> f64 {
+    let sum_log: f64 = a
+        .iter()
+        .map(|&aj| {
+            let x = beta * aj;
+            if x > 30.0 {
+                (-x).exp()
+            } else if x < -30.0 {
+                -x
+            } else {
+                (1.0 + (-x).exp()).ln()
+            }
+        })
+        .sum();
+
+    let e_mean = mean_energy(a, beta);
+    let var_e = variance_energy(a, beta);
+    let log_num = sum_log + beta * e_mean;
+    let log_den = 0.5 * (2.0 * PI * var_e).ln();
+    log_num - log_den
+}
+
+/// Eq (3.2): ⟨E⟩(β) = Σ aⱼ/(1+e^{βaⱼ}). Strictly decreasing in β, so (3.10)
+/// is invertible by bisection (see `find_beta`).
+fn mean_energy(a: &[f64], beta: f64) -> f64 {
+    a.iter().map(|&aj| aj / (1.0 + (beta * aj).exp())).sum()
+}
+
+/// Eq (3.3): Var_β(E) = ∂²log Z/∂β². Appears as √(2π·Var) in the denominator
+/// of (3.9) the Gaussian width of the saddle.
+fn variance_energy(a: &[f64], beta: f64) -> f64 {
+    a.iter()
+        .map(|&aj| {
+            let x = beta * aj;
+            aj * aj / ((1.0 + x.exp()) * (1.0 + (-x).exp()))
+        })
+        .sum()
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    let (mut a, mut b) = (a, b);
+    while b != 0 {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    a
 }
 
 #[cfg(test)]
