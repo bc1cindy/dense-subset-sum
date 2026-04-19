@@ -4,6 +4,17 @@ use std::collections::HashMap;
 
 use crate::sasamoto::{gcd_slice, log_w_signed_sasamoto};
 
+/// 2^22 ≈ 4M entries fits in ~100MB; unbounded N≥20 with sat-scale values hits 10^9 entries (OOM).
+pub const SUMSET_CAP_DEFAULT: usize = 4_194_304;
+
+/// `DSS_SUMSET_CAP` env var or [`SUMSET_CAP_DEFAULT`]. Prefer `*_with_cap` over this process-wide state.
+pub fn sumset_cap() -> usize {
+    std::env::var("DSS_SUMSET_CAP")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(SUMSET_CAP_DEFAULT)
+}
+
 /// Exact W(E) by enumerating 2^N subsets. Max N ≈ 25 in practice.
 pub fn brute_force_w(a: &[u64], e_target: u64) -> u64 {
     let n = a.len();
@@ -16,6 +27,131 @@ pub fn brute_force_w(a: &[u64], e_target: u64) -> u64 {
         }
     }
     count
+}
+
+/// Block-convolution lower bound on W(E). k=N: exact; k=1: loose; k=15..20: practical sweet spot.
+///
+/// Returns `u128` because `W > 2^64` is reachable for N ≥ 64. Callers that cast
+/// to `f64` lose precision above 2^53 (f64 mantissa); that's acceptable for
+/// ratios/error reports but not for equality checks on large W.
+pub fn lookup_w(a: &[u64], e_target: u64, block_size: usize) -> Option<u128> {
+    if a.is_empty() {
+        return None;
+    }
+    let combined = lookup_full_sumset_with_cap(a, block_size, sumset_cap());
+    Some(*combined.get(&e_target).unwrap_or(&0))
+}
+
+pub fn log_lookup_w(a: &[u64], e_target: u64, block_size: usize) -> Option<f64> {
+    let w = lookup_w(a, e_target, block_size)?;
+    if w == 0 {
+        Some(f64::NEG_INFINITY)
+    } else {
+        Some((w as f64).ln())
+    }
+}
+
+/// Signed subset-sum lower bound: log #pairs (S ⊆ positives, T ⊆ negatives) with ΣS − ΣT = target.
+/// Proximity-pruned near `target`. CoinJoin convention: positives=outputs, negatives=inputs.
+pub fn log_lookup_w_signed_target_aware(
+    positives: &[u64],
+    negatives: &[u64],
+    target: i64,
+    block_size: usize,
+    cap: usize,
+) -> Option<f64> {
+    let abs_target = target.unsigned_abs();
+    let pos_target = if target >= 0 { abs_target } else { 0 };
+    let neg_target = if target < 0 { abs_target } else { 0 };
+
+    let pos_sums = lookup_full_sumset_near_target(positives, block_size, cap, pos_target);
+    let neg_sums = lookup_full_sumset_near_target(negatives, block_size, cap, neg_target);
+
+    let mut total: u128 = 0;
+    for (&s_pos, &c_pos) in &pos_sums {
+        let s_neg_required = (s_pos as i64).checked_sub(target)?;
+        if s_neg_required < 0 {
+            continue;
+        }
+        if let Some(&c_neg) = neg_sums.get(&(s_neg_required as u64)) {
+            total = total.saturating_add(c_pos.saturating_mul(c_neg));
+        }
+    }
+    if total == 0 {
+        Some(f64::NEG_INFINITY)
+    } else {
+        Some((total as f64).ln())
+    }
+}
+
+/// Sasamoto for N ≥ 40, target-aware lookup otherwise. Recommended signed entry point.
+pub fn log_w_signed_adaptive(
+    positives: &[u64],
+    negatives: &[u64],
+    target: i64,
+    block_size: usize,
+) -> Option<f64> {
+    let n_total = positives.len() + negatives.len();
+    if n_total >= 40
+        && let Some(v) = log_w_signed_sasamoto(positives, negatives, target)
+        && v.is_finite()
+    {
+        return Some(v);
+    }
+    let cap = sumset_cap();
+    log_lookup_w_signed_target_aware(positives, negatives, target, block_size, cap)
+        .filter(|v| v.is_finite())
+}
+
+/// Exact W(E) via DP: O(N · sum_max). `None` when sum_max exceeds `max_table_size`.
+///
+/// Returns `u128` to represent the exact count up to 2^N. Casting to `f64`
+/// loses precision above 2^53; fine for error ratios, not for equality.
+pub fn dp_w(a: &[u64], e_target: u64, max_table_size: usize) -> Option<u128> {
+    if a.is_empty() {
+        return None;
+    }
+
+    let g = gcd_slice(a);
+    if g == 0 {
+        return None;
+    }
+    if !e_target.is_multiple_of(g) {
+        return Some(0);
+    }
+
+    let a_norm: Vec<u64> = a.iter().map(|&v| v / g).collect();
+    let e_norm = e_target / g;
+    let sum_max: u64 = a_norm.iter().sum();
+
+    if e_norm > sum_max {
+        return Some(0);
+    }
+    if sum_max as usize > max_table_size {
+        return None;
+    }
+
+    let sz = sum_max as usize + 1;
+    let mut dp = vec![0u128; sz];
+    dp[0] = 1;
+
+    for &val in &a_norm {
+        let v = val as usize;
+        for j in (v..sz).rev() {
+            dp[j] += dp[j - v];
+        }
+    }
+
+    Some(dp[e_norm as usize])
+}
+
+pub fn log_dp_w(a: &[u64], e_target: u64, max_table_size: usize) -> Option<f64> {
+    let w = dp_w(a, e_target, max_table_size)?;
+    if w == 0 {
+        Some(f64::NEG_INFINITY)
+    } else {
+        Some((w as f64).ln())
+    }
 }
 
 /// Exact sumset of a small block: HashMap<sum, count> over all 2^n subsets.
@@ -74,17 +210,6 @@ fn convolve_capped_near_target(
 
 fn convolve(a: &HashMap<u64, u128>, b: &HashMap<u64, u128>, cap: usize) -> HashMap<u64, u128> {
     convolve_capped(a, b, cap)
-}
-
-/// 2^22 ≈ 4M entries fits in ~100MB; unbounded N≥20 with sat-scale values hits 10^9 entries (OOM).
-pub const SUMSET_CAP_DEFAULT: usize = 4_194_304;
-
-/// `DSS_SUMSET_CAP` env var or [`SUMSET_CAP_DEFAULT`]. Prefer `*_with_cap` over this process-wide state.
-pub fn sumset_cap() -> usize {
-    std::env::var("DSS_SUMSET_CAP")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(SUMSET_CAP_DEFAULT)
 }
 
 /// Block-convolved sumset. Over cap, remaining blocks fold naively as {0, v_i} — still a valid W lower bound.
@@ -159,131 +284,6 @@ fn lookup_full_sumset_near_target(
         combined = convolve_capped_near_target(&combined, &block_sums, cap, target);
     }
     combined
-}
-
-/// Block-convolution lower bound on W(E). k=N: exact; k=1: loose; k=15..20: practical sweet spot.
-///
-/// Returns `u128` because `W > 2^64` is reachable for N ≥ 64. Callers that cast
-/// to `f64` lose precision above 2^53 (f64 mantissa); that's acceptable for
-/// ratios/error reports but not for equality checks on large W.
-pub fn lookup_w(a: &[u64], e_target: u64, block_size: usize) -> Option<u128> {
-    if a.is_empty() {
-        return None;
-    }
-    let combined = lookup_full_sumset_with_cap(a, block_size, sumset_cap());
-    Some(*combined.get(&e_target).unwrap_or(&0))
-}
-
-/// Signed subset-sum lower bound: log #pairs (S ⊆ positives, T ⊆ negatives) with ΣS − ΣT = target.
-/// Proximity-pruned near `target`. CoinJoin convention: positives=outputs, negatives=inputs.
-pub fn log_lookup_w_signed_target_aware(
-    positives: &[u64],
-    negatives: &[u64],
-    target: i64,
-    block_size: usize,
-    cap: usize,
-) -> Option<f64> {
-    let abs_target = target.unsigned_abs();
-    let pos_target = if target >= 0 { abs_target } else { 0 };
-    let neg_target = if target < 0 { abs_target } else { 0 };
-
-    let pos_sums = lookup_full_sumset_near_target(positives, block_size, cap, pos_target);
-    let neg_sums = lookup_full_sumset_near_target(negatives, block_size, cap, neg_target);
-
-    let mut total: u128 = 0;
-    for (&s_pos, &c_pos) in &pos_sums {
-        let s_neg_required = (s_pos as i64).checked_sub(target)?;
-        if s_neg_required < 0 {
-            continue;
-        }
-        if let Some(&c_neg) = neg_sums.get(&(s_neg_required as u64)) {
-            total = total.saturating_add(c_pos.saturating_mul(c_neg));
-        }
-    }
-    if total == 0 {
-        Some(f64::NEG_INFINITY)
-    } else {
-        Some((total as f64).ln())
-    }
-}
-
-/// Sasamoto for N ≥ 40, target-aware lookup otherwise. Recommended signed entry point.
-pub fn log_w_signed_adaptive(
-    positives: &[u64],
-    negatives: &[u64],
-    target: i64,
-    block_size: usize,
-) -> Option<f64> {
-    let n_total = positives.len() + negatives.len();
-    if n_total >= 40
-        && let Some(v) = log_w_signed_sasamoto(positives, negatives, target)
-        && v.is_finite()
-    {
-        return Some(v);
-    }
-    let cap = sumset_cap();
-    log_lookup_w_signed_target_aware(positives, negatives, target, block_size, cap)
-        .filter(|v| v.is_finite())
-}
-
-pub fn log_lookup_w(a: &[u64], e_target: u64, block_size: usize) -> Option<f64> {
-    let w = lookup_w(a, e_target, block_size)?;
-    if w == 0 {
-        Some(f64::NEG_INFINITY)
-    } else {
-        Some((w as f64).ln())
-    }
-}
-
-/// Exact W(E) via DP: O(N · sum_max). `None` when sum_max exceeds `max_table_size`.
-///
-/// Returns `u128` to represent the exact count up to 2^N. Casting to `f64`
-/// loses precision above 2^53; fine for error ratios, not for equality.
-pub fn dp_w(a: &[u64], e_target: u64, max_table_size: usize) -> Option<u128> {
-    if a.is_empty() {
-        return None;
-    }
-
-    let g = gcd_slice(a);
-    if g == 0 {
-        return None;
-    }
-    if !e_target.is_multiple_of(g) {
-        return Some(0);
-    }
-
-    let a_norm: Vec<u64> = a.iter().map(|&v| v / g).collect();
-    let e_norm = e_target / g;
-    let sum_max: u64 = a_norm.iter().sum();
-
-    if e_norm > sum_max {
-        return Some(0);
-    }
-    if sum_max as usize > max_table_size {
-        return None;
-    }
-
-    let sz = sum_max as usize + 1;
-    let mut dp = vec![0u128; sz];
-    dp[0] = 1;
-
-    for &val in &a_norm {
-        let v = val as usize;
-        for j in (v..sz).rev() {
-            dp[j] += dp[j - v];
-        }
-    }
-
-    Some(dp[e_norm as usize])
-}
-
-pub fn log_dp_w(a: &[u64], e_target: u64, max_table_size: usize) -> Option<f64> {
-    let w = dp_w(a, e_target, max_table_size)?;
-    if w == 0 {
-        Some(f64::NEG_INFINITY)
-    } else {
-        Some((w as f64).ln())
-    }
 }
 
 #[cfg(test)]
