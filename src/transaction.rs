@@ -1,4 +1,3 @@
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Transaction {
     pub inputs: Vec<u64>,
@@ -24,5 +23,9 @@ impl Transaction {
 
     pub fn len(&self) -> usize {
         self.inputs.len() + self.outputs.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inputs.is_empty() && self.outputs.is_empty()
     }
 }

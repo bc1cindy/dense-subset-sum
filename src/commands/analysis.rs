@@ -77,9 +77,7 @@ pub(crate) fn cmd_analyze_tx(inputs_str: &str, outputs_str: &str) {
         tx.outputs.len()
     );
     println!("  Σinputs={}, Σoutputs={}", tx.input_sum(), tx.output_sum());
-    if let Some(fee) = tx.fee() {
-        println!("  Fee: {} sat", fee);
-    }
+    println!("  Fee: {} sat", tx.fee());
 
     let metrics = mappings::analyze(&tx);
     println!("\nMappings:");

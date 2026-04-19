@@ -119,7 +119,7 @@ pub fn compare_w_vs_mappings_with(
     max_coins: usize,
     fee_handling: FeeHandling,
 ) -> Option<MappingComparison> {
-    let fee = tx.fee()?;
+    let fee = tx.fee();
 
     let balanced_tx = if fee > 0 {
         let mut outputs = tx.outputs.clone();

@@ -162,7 +162,7 @@ mod tests {
         let tx = random_coinjoin(&dist, 3, 2, 42);
         assert_eq!(tx.inputs.len(), 6);
         assert_eq!(tx.outputs.len(), 6);
-        assert_eq!(tx.fee(), Some(0));
+        assert_eq!(tx.fee(), 0);
     }
 
     #[test]

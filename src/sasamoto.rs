@@ -377,7 +377,7 @@ mod tests {
     #[test]
     fn test_equal_denominations_gcd() {
         let tx = fixtures::equal_denominations();
-        assert_eq!(tx.fee(), Some(0));
+        assert_eq!(tx.fee(), 0);
         let all_values: Vec<u64> = tx.inputs.iter().chain(tx.outputs.iter()).copied().collect();
         assert_eq!(gcd_slice(&all_values), 50_000);
     }
