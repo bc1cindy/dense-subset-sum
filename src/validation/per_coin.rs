@@ -1,7 +1,9 @@
 //! Per-coin "unconstrained-ness": W(E=coin_value, A=other coins) via signed probe.
 
 use super::exclude_values;
-use crate::{Transaction, log_lookup_w_signed_target_aware, log_w_signed_sasamoto, sumset_cap};
+use crate::{
+    DEFAULT_MAX_ENTRIES, Transaction, log_lookup_w_signed_target_aware, log_w_signed_sasamoto,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoinRole {
@@ -50,8 +52,7 @@ fn signed_probe(positives: &[u64], negatives: &[u64], target: i64, lookup_k: usi
     {
         return Some(v);
     }
-    let cap = sumset_cap();
-    log_lookup_w_signed_target_aware(positives, negatives, target, lookup_k, cap)
+    log_lookup_w_signed_target_aware(positives, negatives, target, lookup_k, DEFAULT_MAX_ENTRIES)
         .filter(|v| v.is_finite())
 }
 

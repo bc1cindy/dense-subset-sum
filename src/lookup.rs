@@ -5,15 +5,7 @@ use std::collections::HashMap;
 use crate::sasamoto::{gcd_slice, log_w_signed_sasamoto};
 
 /// 2^22 ≈ 4M entries fits in ~100MB; unbounded N≥20 with sat-scale values hits 10^9 entries (OOM).
-pub const SUMSET_CAP_DEFAULT: usize = 4_194_304;
-
-/// `DSS_SUMSET_CAP` env var or [`SUMSET_CAP_DEFAULT`]. Prefer `*_with_cap` over this process-wide state.
-pub fn sumset_cap() -> usize {
-    std::env::var("DSS_SUMSET_CAP")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(SUMSET_CAP_DEFAULT)
-}
+pub const DEFAULT_MAX_ENTRIES: usize = 4_194_304;
 
 /// Exact W(E) by enumerating 2^N subsets. Max N ≈ 25 in practice.
 pub fn brute_force_w(a: &[u64], e_target: u64) -> u64 {
@@ -38,7 +30,7 @@ pub fn lookup_w(a: &[u64], e_target: u64, block_size: usize) -> Option<u128> {
     if a.is_empty() {
         return None;
     }
-    let combined = lookup_full_sumset_with_cap(a, block_size, sumset_cap());
+    let combined = full_sumset(a, block_size, DEFAULT_MAX_ENTRIES);
     Some(*combined.get(&e_target).unwrap_or(&0))
 }
 
@@ -58,14 +50,14 @@ pub fn log_lookup_w_signed_target_aware(
     negatives: &[u64],
     target: i64,
     block_size: usize,
-    cap: usize,
+    max_entries: usize,
 ) -> Option<f64> {
     let abs_target = target.unsigned_abs();
     let pos_target = if target >= 0 { abs_target } else { 0 };
     let neg_target = if target < 0 { abs_target } else { 0 };
 
-    let pos_sums = lookup_full_sumset_near_target(positives, block_size, cap, pos_target);
-    let neg_sums = lookup_full_sumset_near_target(negatives, block_size, cap, neg_target);
+    let pos_sums = full_sumset_near_target(positives, block_size, max_entries, pos_target);
+    let neg_sums = full_sumset_near_target(negatives, block_size, max_entries, neg_target);
 
     let mut total: u128 = 0;
     for (&s_pos, &c_pos) in &pos_sums {
@@ -98,9 +90,14 @@ pub fn log_w_signed_adaptive(
     {
         return Some(v);
     }
-    let cap = sumset_cap();
-    log_lookup_w_signed_target_aware(positives, negatives, target, block_size, cap)
-        .filter(|v| v.is_finite())
+    log_lookup_w_signed_target_aware(
+        positives,
+        negatives,
+        target,
+        block_size,
+        DEFAULT_MAX_ENTRIES,
+    )
+    .filter(|v| v.is_finite())
 }
 
 /// Exact W(E) via DP: O(N · sum_max). `None` when sum_max exceeds `max_table_size`.
@@ -168,29 +165,29 @@ fn block_sumset(block: &[u64]) -> HashMap<u64, u128> {
     counts
 }
 
-/// Minkowski convolution; bails at `cap` — result is a sub-sumset, still a lower bound on W.
+/// Minkowski convolution; bails at `max_entries` — result is a sub-sumset, still a lower bound on W.
 fn convolve_capped(
     a: &HashMap<u64, u128>,
     b: &HashMap<u64, u128>,
-    cap: usize,
+    max_entries: usize,
 ) -> HashMap<u64, u128> {
     let mut result: HashMap<u64, u128> = HashMap::new();
     for (&s1, &c1) in a {
         for (&s2, &c2) in b {
             *result.entry(s1 + s2).or_insert(0) += c1 * c2;
         }
-        if result.len() >= cap {
+        if result.len() >= max_entries {
             break;
         }
     }
     result
 }
 
-/// When over cap, keeps entries closest to `target` — tighter lower bound on W(target).
+/// When over `max_entries`, keeps entries closest to `target` — tighter lower bound on W(target).
 fn convolve_capped_near_target(
     a: &HashMap<u64, u128>,
     b: &HashMap<u64, u128>,
-    cap: usize,
+    max_entries: usize,
     target: u64,
 ) -> HashMap<u64, u128> {
     let mut result: HashMap<u64, u128> = HashMap::new();
@@ -199,21 +196,25 @@ fn convolve_capped_near_target(
             *result.entry(s1 + s2).or_insert(0) += c1 * c2;
         }
     }
-    if result.len() <= cap {
+    if result.len() <= max_entries {
         return result;
     }
     let mut entries: Vec<(u64, u128)> = result.into_iter().collect();
     entries.sort_by_key(|&(s, _)| (s as i64 - target as i64).unsigned_abs());
-    entries.truncate(cap);
+    entries.truncate(max_entries);
     entries.into_iter().collect()
 }
 
-fn convolve(a: &HashMap<u64, u128>, b: &HashMap<u64, u128>, cap: usize) -> HashMap<u64, u128> {
-    convolve_capped(a, b, cap)
+fn convolve(
+    a: &HashMap<u64, u128>,
+    b: &HashMap<u64, u128>,
+    max_entries: usize,
+) -> HashMap<u64, u128> {
+    convolve_capped(a, b, max_entries)
 }
 
-/// Block-convolved sumset. Over cap, remaining blocks fold naively as {0, v_i} — still a valid W lower bound.
-fn lookup_full_sumset_with_cap(a: &[u64], block_size: usize, cap: usize) -> HashMap<u64, u128> {
+/// Block-convolved sumset. Over `max_entries`, remaining blocks fold naively as {0, v_i} — still a valid W lower bound.
+fn full_sumset(a: &[u64], block_size: usize, max_entries: usize) -> HashMap<u64, u128> {
     if a.is_empty() {
         let mut m = HashMap::new();
         m.insert(0u64, 1u128);
@@ -223,7 +224,7 @@ fn lookup_full_sumset_with_cap(a: &[u64], block_size: usize, cap: usize) -> Hash
     let blocks: Vec<&[u64]> = a.chunks(k).collect();
     let mut combined = block_sumset(blocks[0]);
     for block in &blocks[1..] {
-        let block_sums = if combined.len() >= cap {
+        let block_sums = if combined.len() >= max_entries {
             let mut coarse = HashMap::new();
             coarse.insert(0u64, 1u128);
             for &v in *block {
@@ -232,7 +233,7 @@ fn lookup_full_sumset_with_cap(a: &[u64], block_size: usize, cap: usize) -> Hash
                     *next.entry(s + v).or_insert(0) += c;
                 }
                 coarse = next;
-                if coarse.len() >= cap {
+                if coarse.len() >= max_entries {
                     break;
                 }
             }
@@ -240,19 +241,19 @@ fn lookup_full_sumset_with_cap(a: &[u64], block_size: usize, cap: usize) -> Hash
         } else {
             block_sumset(block)
         };
-        combined = convolve(&combined, &block_sums, cap);
-        if combined.len() >= cap {
+        combined = convolve(&combined, &block_sums, max_entries);
+        if combined.len() >= max_entries {
             break;
         }
     }
     combined
 }
 
-/// Proximity-pruned variant: keeps entries closest to `target` when over cap.
-fn lookup_full_sumset_near_target(
+/// Proximity-pruned variant: keeps entries closest to `target` when over `max_entries`.
+fn full_sumset_near_target(
     a: &[u64],
     block_size: usize,
-    cap: usize,
+    max_entries: usize,
     target: u64,
 ) -> HashMap<u64, u128> {
     if a.is_empty() {
@@ -264,7 +265,7 @@ fn lookup_full_sumset_near_target(
     let blocks: Vec<&[u64]> = a.chunks(k).collect();
     let mut combined = block_sumset(blocks[0]);
     for block in &blocks[1..] {
-        let block_sums = if combined.len() >= cap {
+        let block_sums = if combined.len() >= max_entries {
             let mut coarse = HashMap::new();
             coarse.insert(0u64, 1u128);
             for &v in *block {
@@ -273,7 +274,7 @@ fn lookup_full_sumset_near_target(
                     *next.entry(s + v).or_insert(0) += c;
                 }
                 coarse = next;
-                if coarse.len() >= cap {
+                if coarse.len() >= max_entries {
                     break;
                 }
             }
@@ -281,7 +282,7 @@ fn lookup_full_sumset_near_target(
         } else {
             block_sumset(block)
         };
-        combined = convolve_capped_near_target(&combined, &block_sums, cap, target);
+        combined = convolve_capped_near_target(&combined, &block_sums, max_entries, target);
     }
     combined
 }
