@@ -1,5 +1,6 @@
 //! Correlation and summary statistics shared across validation modules.
 
+/// Outlier-resistant summary used in estimator-error tables.
 pub fn median(vals: &[f64]) -> f64 {
     if vals.is_empty() {
         return f64::NAN;
@@ -14,6 +15,7 @@ pub fn median(vals: &[f64]) -> f64 {
     }
 }
 
+/// Rank correlation in [-1, 1]; compares estimators at different scales.
 pub fn spearman_correlation(x: &[f64], y: &[f64]) -> f64 {
     assert_eq!(x.len(), y.len());
     let n = x.len();
@@ -41,6 +43,7 @@ pub fn spearman_correlation(x: &[f64], y: &[f64]) -> f64 {
     if den == 0.0 { 0.0 } else { num / den }
 }
 
+/// Linear correlation in [-1, 1]; compares estimators at the same scale.
 pub fn pearson_correlation(x: &[f64], y: &[f64]) -> f64 {
     let n = x.len();
     if n < 2 {
@@ -62,6 +65,7 @@ pub fn pearson_correlation(x: &[f64], y: &[f64]) -> f64 {
     if den == 0.0 { 0.0 } else { num / den }
 }
 
+/// Converts values to 1-based ranks (Spearman input); ties get averaged ranks.
 fn ranks(vals: &[f64]) -> Vec<f64> {
     let n = vals.len();
     let mut indexed: Vec<(usize, f64)> = vals.iter().copied().enumerate().collect();
