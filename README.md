@@ -261,3 +261,4 @@ Any indexer output mapping to `Vec<u64>` of satoshis drops in. The scale switch 
 3. Maurer, Neudecker, Florian — *Anonymous CoinJoin Transactions with Arbitrary Values* (2017).
 4. Maxwell — *CoinJoin: Bitcoin privacy for the real world* (bitcointalk, 2013).
 5. LaurentMT — *Boltzmann / OXT entropy analysis* (Samourai, 2017).
+6. Centre for Research on Cryptography and Security (CRoCS), Masaryk University — *coinjoin-analysis: processing and analysis of Wasabi/Whirlpool/JoinMarket coinjoin datasets*. GitHub repository, [crocs-muni/coinjoin-analysis](https://github.com/crocs-muni/coinjoin-analysis).

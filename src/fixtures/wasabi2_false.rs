@@ -1,6 +1,11 @@
-//! Negative Wasabi 2 CoinJoins — lookalikes from crocs-muni/coinjoin-analysis
-//! (data/wasabi2/false_cjtxs.json): coinjoin-shaped but manually classified as
-//! non-coinjoins (consolidations, stdenom-style structured txs, etc).
+//! Negative Wasabi 2 CoinJoins — lookalikes manually classified as non-coinjoins
+//! (consolidations, stdenom-style structured txs, etc) by the CRoCS group.
+//!
+//! Source: Centre for Research on Cryptography and Security (CRoCS), Masaryk
+//! University — *coinjoin-analysis: processing and analysis of Wasabi/Whirlpool/
+//! JoinMarket coinjoin datasets*. GitHub repository.
+//! <https://github.com/crocs-muni/coinjoin-analysis>
+//! Data file: `data/wasabi2/false_cjtxs.json`.
 
 use crate::Transaction;
 

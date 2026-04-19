@@ -1,5 +1,11 @@
-//! Positive Wasabi 2 CoinJoins — 30 manual-bucket txs from crocs-muni/coinjoin-analysis
-//! (data/wasabi2/txid_coord.json), stratified by N_in with seed=42.
+//! Positive Wasabi 2 CoinJoins — 30 manual-bucket txs, stratified by N_in
+//! with seed=42.
+//!
+//! Source: Centre for Research on Cryptography and Security (CRoCS), Masaryk
+//! University — *coinjoin-analysis: processing and analysis of Wasabi/Whirlpool/
+//! JoinMarket coinjoin datasets*. GitHub repository.
+//! <https://github.com/crocs-muni/coinjoin-analysis>
+//! Data file: `data/wasabi2/txid_coord.json`.
 
 use crate::Transaction;
 
