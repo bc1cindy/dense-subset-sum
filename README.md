@@ -23,7 +23,7 @@ Computing `W(E)` exactly is also exponential in the worst case, so the tool runs
 2. **Block-convolution lookup** for medium sets — a proven lower bound.
 3. **Asymptotic approximation** (Sasamoto / Toyoizumi / Nishimori) for large CoinJoins — fast, accurate at scale, but an approximation with error at finite N.
 
-Inspection commands (`compare`, `compare-empirical`, `full-report`) print every applicable tier side-by-side so disagreements between estimators stay visible. Scoring commands that must return a single number (`cost`, `density`) pick the tier by regime and fall back to `min(Sasamoto, lookup)` once `N` is large enough for the asymptotic regime, so the reported number is never more optimistic than the proven lookup lower bound.
+Inspection commands (`compare`, `full-report`) print every applicable tier side-by-side so disagreements between estimators stay visible. Scoring commands that must return a single number (`cost`, `density`) pick the tier by regime and fall back to `min(Sasamoto, lookup)` once `N` is large enough for the asymptotic regime, so the reported number is never more optimistic than the proven lookup lower bound.
 
 ## Install
 
@@ -31,7 +31,7 @@ Inspection commands (`compare`, `compare-empirical`, `full-report`) print every 
 cargo build --release
 export BIN=./target/release/dense-subset-sum
 
-# Required only for `compare-empirical` (real Bitcoin UTXO distribution, ~353 MB):
+# Optional: used by the library's empirical-distribution tests (~353 MB).
 bash scripts/fetch_cja_distribution.sh
 ```
 
@@ -76,7 +76,6 @@ $BIN suggest-split -i ... -o ... --change 7168 --max-pieces 6
 # Validate estimators against ground truth
 $BIN compare-synthetic --n 50 --l-max 500
 $BIN compare-wasabi2
-$BIN compare-empirical --n 50 --samples 2000000 --divisor 1000000   # requires fetch_cja_distribution.sh
 $BIN compare-fixtures
 
 # Full test suite
@@ -206,15 +205,6 @@ crossover k* (fraction_dense ≈ 0.5): 24.00
 
 The band of E values where random subsets land in the dense regime, and the subset size `k*` at which a random subset is dense more than half the time.
 
-### `compare-empirical`
-
-```
-Rescaled by /1000: kept 27/30 non-zero values
-N=27 > 25: switching to Monte Carlo (500000 samples, 60000 ms cap)
-```
-
-`--divisor` rescales sat-level values. At raw satoshi granularity every subset sum is unique (`W range: [0, 0]`), so work at mBTC (`--divisor 1000`) or BTC-scale (`--divisor 1000000`). At `N > 25`, Monte Carlo takes over.
-
 ## FAQ
 
 **`full-report` says `W = 0 (unreachable)` but the regime is `Dense`. Contradiction?**
@@ -225,9 +215,6 @@ The asymptotic approximation requires the target to land on the GCD lattice of t
 
 **Sasamoto's error is 99% but Spearman is 1.0. How?**
 The approximation can have a systematic scale bias while still ranking E values correctly. Spearman captures the ranking (useful for comparing sub-transactions); absolute error captures the bias. The tool uses Sasamoto for the former, lookup/DP for the latter.
-
-**`compare-empirical --divisor 1` shows `W range: [0, 0]`. Why is the divisor needed?**
-Real Bitcoin UTXOs hold arbitrary 64-bit sat values (e.g. 47 382 719, 128 394 021). No two distinct subsets of a few dozen such values ever land on the same sum by chance, so every `W(E) ∈ {0, 1}` — there is no density to measure. The divisor floor-divides each value into a coarser grid (mBTC with `/1000`, BTC-scale with `/1000000`), so nearby values fall into the same bucket and subsets start colliding. `compare-wasabi2` doesn't need a divisor because Wasabi 2 uses round denominations (50 M, 100 M sat…) that collide naturally.
 
 **`analyze-tx` reports `Entropy: 0.000 bits` on a tx with multiple mappings.**
 Boltzmann entropy collapses to 0 when every mapping shares the same deterministic links. Check the `Non-derived mappings` list for the actual alternatives.

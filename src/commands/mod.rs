@@ -17,8 +17,8 @@ pub(crate) use analysis::{
     cmd_full_report, cmd_marginal_score, cmd_suggest_split,
 };
 pub(crate) use compare::{
-    cmd_compare, cmd_compare_empirical, cmd_compare_fixtures, cmd_compare_random,
-    cmd_compare_synthetic, cmd_compare_wasabi2, cmd_validate,
+    cmd_compare, cmd_compare_fixtures, cmd_compare_random, cmd_compare_synthetic,
+    cmd_compare_wasabi2, cmd_validate,
 };
 pub(crate) use density::{
     cmd_dense_boundary, cmd_density, cmd_density_scan, cmd_kappa, cmd_subset_density,

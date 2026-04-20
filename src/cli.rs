@@ -3,10 +3,10 @@
 use clap::{Parser, Subcommand};
 
 use crate::commands::{
-    cmd_analyze_tx, cmd_calibrate_privacy, cmd_coin_scores, cmd_compare, cmd_compare_empirical,
-    cmd_compare_fixtures, cmd_compare_random, cmd_compare_synthetic, cmd_compare_wasabi2, cmd_cost,
-    cmd_dense_boundary, cmd_density, cmd_density_scan, cmd_estimate, cmd_full_report, cmd_kappa,
-    cmd_marginal_score, cmd_subset_density, cmd_suggest_split, cmd_validate,
+    cmd_analyze_tx, cmd_calibrate_privacy, cmd_coin_scores, cmd_compare, cmd_compare_fixtures,
+    cmd_compare_random, cmd_compare_synthetic, cmd_compare_wasabi2, cmd_cost, cmd_dense_boundary,
+    cmd_density, cmd_density_scan, cmd_estimate, cmd_full_report, cmd_kappa, cmd_marginal_score,
+    cmd_subset_density, cmd_suggest_split, cmd_validate,
 };
 
 #[derive(Parser)]
@@ -246,33 +246,6 @@ enum Command {
         #[arg(short = 'k', long, default_value = "15")]
         block_size: usize,
     },
-    /// Compare estimators on empirical Bitcoin UTXO distribution
-    CompareEmpirical {
-        /// Number of values. N>25 triggers Monte Carlo sampling in place of exhaustive enumeration.
-        #[arg(short, long, default_value = "16")]
-        n: usize,
-        /// Random seed
-        #[arg(short, long, default_value = "42")]
-        seed: u64,
-        /// Minimum W (exhaustive) or minimum observed count (Monte Carlo) for test points.
-        #[arg(short = 'w', long, default_value = "5")]
-        min_w: u64,
-        /// Block size for lookup table
-        #[arg(short = 'k', long, default_value = "10")]
-        block_size: usize,
-        /// Path to CJA `distribution.bin` (fetch via scripts/fetch_cja_distribution.sh).
-        #[arg(long)]
-        bin: Option<std::path::PathBuf>,
-        /// Divisor applied to each sampled value. Needed at sat scale where sub-sums are unique.
-        #[arg(long, default_value = "1")]
-        divisor: u64,
-        /// Monte Carlo sample count (only used when N > 25).
-        #[arg(long, default_value = "1000000")]
-        samples: u64,
-        /// Monte Carlo timeout in milliseconds (only used when N > 25).
-        #[arg(long, default_value = "60000")]
-        timeout_ms: u64,
-    },
     /// Sasamoto vs DP ground truth on synthetic uniform inputs at large N.
     CompareSynthetic {
         /// Number of values. N≥100 slows because Lookup scales as N·Σa.
@@ -411,25 +384,6 @@ pub fn run(cli: Cli) {
             sizes.as_deref(),
             samples,
             seed,
-        ),
-        Command::CompareEmpirical {
-            n,
-            seed,
-            min_w,
-            block_size,
-            bin,
-            divisor,
-            samples,
-            timeout_ms,
-        } => cmd_compare_empirical(
-            n,
-            seed,
-            min_w,
-            block_size,
-            bin.as_deref(),
-            divisor,
-            samples,
-            timeout_ms,
         ),
         Command::CompareSynthetic {
             n,
