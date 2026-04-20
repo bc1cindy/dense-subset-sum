@@ -1,6 +1,6 @@
 //! Change decomposition — Maurer §5 output splitting.
 //!
-//! Separate from `loss` because change decomposition is a *search* over candidate
+//! Separate from `estimator` because change decomposition is a *search* over candidate
 //! output-side splits ranked by mean signed log₂W.
 
 use crate::{Transaction, validation};

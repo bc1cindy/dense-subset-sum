@@ -1,8 +1,8 @@
 //! Per-tx full reports, per-coin scores, privacy calibration, and split suggestions.
 
 use dense_subset_sum::{
-    brute_force_w, change_split, density_regime, fixtures, kappa, log_lookup_w, log_w_for_e_sat,
-    loss, mappings, validation,
+    brute_force_w, change_split, density_regime, estimator, fixtures, kappa, log_lookup_w,
+    log_w_for_e_sat, mappings, validation,
 };
 
 use super::{
@@ -35,11 +35,11 @@ pub(crate) fn cmd_marginal_score(
         std::process::exit(1);
     }
 
-    let config = loss::LossConfig {
+    let config = estimator::EstimatorConfig {
         lookup_k: block_size,
         ..Default::default()
     };
-    let (before, after, delta) = loss::marginal_score(&tx, &new_inputs, &new_outputs, &config);
+    let (before, after, delta) = estimator::marginal_score(&tx, &new_inputs, &new_outputs, &config);
 
     println!(
         "Base tx: {} ({} in / {} out)",
@@ -148,12 +148,12 @@ pub(crate) fn cmd_estimate(inputs_str: &str, outputs_str: &str, block_size: usiz
 pub(crate) fn cmd_cost(inputs_str: &str, outputs_str: &str, block_size: usize) {
     let tx = parse_tx(inputs_str, outputs_str);
 
-    let config = loss::LossConfig {
+    let config = estimator::EstimatorConfig {
         lookup_k: block_size,
         ..Default::default()
     };
 
-    let regime = loss::analyze_regime(&tx, &config);
+    let regime = estimator::analyze_regime(&tx, &config);
     println!(
         "Transaction: {} inputs, {} outputs",
         tx.inputs.len(),
@@ -169,11 +169,11 @@ pub(crate) fn cmd_cost(inputs_str: &str, outputs_str: &str, block_size: usize) {
     println!("\n{:>12}  {:>10}", "Input", "Score");
     println!("{:─<24}", "");
     for (i, &val) in tx.inputs.iter().enumerate() {
-        let s = loss::score_sub_tx(&tx, &[i], &config);
+        let s = estimator::score_sub_tx(&tx, &[i], &config);
         println!("{:>12}  {:>10.4}", val, s);
     }
 
-    let avg = loss::score(&tx.inputs, tx.inputs.iter().sum::<u64>() / 2, &config);
+    let avg = estimator::score(&tx.inputs, tx.inputs.iter().sum::<u64>() / 2, &config);
     println!("\nMidpoint score: {:.4}", avg);
 }
 
@@ -198,7 +198,7 @@ pub(crate) fn cmd_full_report(
     block_size: usize,
 ) {
     let (label, tx) = resolve_tx(tx_label, tx_json, inputs_str, outputs_str);
-    let cfg = loss::LossConfig {
+    let cfg = estimator::EstimatorConfig {
         lookup_k: block_size,
         ..Default::default()
     };
@@ -217,7 +217,7 @@ pub(crate) fn cmd_full_report(
     );
 
     let target_half = sum_in / 2;
-    let regime = loss::analyze_regime(&tx, &cfg);
+    let regime = estimator::analyze_regime(&tx, &cfg);
     let dense_str = regime
         .dense_at_quartile
         .map(|b| b.to_string())
@@ -248,8 +248,11 @@ pub(crate) fn cmd_full_report(
         "  log W  [Sasamoto]:       {}",
         fmt_log_w(sasamoto_mid, ln2)
     );
-    let score_mid = loss::score(&tx.inputs, target_half, &cfg);
-    println!("  loss::score (log₂/N):    {:.4}  (N={})", score_mid, n_in);
+    let score_mid = estimator::score(&tx.inputs, target_half, &cfg);
+    println!(
+        "  estimator::score (log₂/N):    {:.4}  (N={})",
+        score_mid, n_in
+    );
 
     println!("\n── Per-coin ambiguity ──");
     let coins_sg = validation::per_coin_scores_signed(&tx, block_size);

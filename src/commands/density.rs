@@ -1,7 +1,7 @@
 //! κ/κ_c regime tooling, target sweeps, and subset-size density sweeps.
 
 use dense_subset_sum::{
-    density_regime, find_dense_region, kappa, kappa_c, log_w_for_e, loss, validation,
+    density_regime, estimator, find_dense_region, kappa, kappa_c, log_w_for_e, validation,
 };
 
 use super::{parse_values, parse_values_f64, resolve_tx, resolve_values};
@@ -15,7 +15,7 @@ pub(crate) fn cmd_density(
 ) {
     let (label, values) = resolve_values(tx_label, tx_json, values_str, false);
 
-    let cfg = loss::LossConfig {
+    let cfg = estimator::EstimatorConfig {
         lookup_k: block_size,
         ..Default::default()
     };
@@ -24,7 +24,7 @@ pub(crate) fn cmd_density(
     let sum: u64 = values.iter().sum();
     let e_target = target.unwrap_or(sum / 2);
 
-    let de = loss::estimate_density(&values, e_target, &cfg);
+    let de = estimator::estimate_density(&values, e_target, &cfg);
 
     println!("═══ Density: {} ═══", label);
     println!(
@@ -57,7 +57,10 @@ pub(crate) fn cmd_density(
         None => println!("  log W:           —"),
     }
     println!("  Reliable:        {}", de.reliable);
-    println!("  is_dense(...):   {}", de.regime == loss::Regime::Dense);
+    println!(
+        "  is_dense(...):   {}",
+        de.regime == estimator::Regime::Dense
+    );
 }
 
 pub(crate) fn cmd_density_scan(values_str: &str, steps: usize, min_log_w: f64) {

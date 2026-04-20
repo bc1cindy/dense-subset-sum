@@ -6,9 +6,9 @@
 pub mod change_split;
 pub mod comparison;
 pub mod dense_region;
+pub mod estimator;
 pub mod fixtures;
 pub mod lookup;
-pub mod loss;
 pub mod mappings;
 pub mod radix;
 pub mod regime;

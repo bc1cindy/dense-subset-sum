@@ -12,7 +12,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct LossConfig {
+pub struct EstimatorConfig {
     pub lookup_k: usize,
     pub radix_hw_threshold: u32,
     pub force_conservative: bool,
@@ -22,7 +22,7 @@ pub struct LossConfig {
     pub dp_max_table: usize,
 }
 
-impl Default for LossConfig {
+impl Default for EstimatorConfig {
     fn default() -> Self {
         Self {
             lookup_k: 15,
@@ -52,7 +52,7 @@ impl EstimatorChoice {
     }
 }
 
-fn select_estimator(n: usize, use_radix: bool, config: &LossConfig) -> EstimatorChoice {
+fn select_estimator(n: usize, use_radix: bool, config: &EstimatorConfig) -> EstimatorChoice {
     if use_radix || config.force_conservative {
         EstimatorChoice::Lookup
     } else if n <= config.exact_threshold {
@@ -103,7 +103,7 @@ pub struct DensityEstimate {
 }
 
 /// Fail-closed: returns `Sparse`/`Unknown` when no positive sound lower bound exists.
-pub fn estimate_density(a: &[u64], e_target: u64, config: &LossConfig) -> DensityEstimate {
+pub fn estimate_density(a: &[u64], e_target: u64, config: &EstimatorConfig) -> DensityEstimate {
     let k = kappa(a);
     let n = a.len();
 
@@ -218,7 +218,7 @@ pub fn estimate_density(a: &[u64], e_target: u64, config: &LossConfig) -> Densit
 ///   nats. This is the per-coin signed-multiset probe.
 /// - [`marginal_score`]: `(before, after, delta)` of mean signed log₂W per coin,
 ///   comparing the current tx to the augmented tx.
-pub fn score(a: &[u64], e_target: u64, config: &LossConfig) -> f64 {
+pub fn score(a: &[u64], e_target: u64, config: &EstimatorConfig) -> f64 {
     let n = a.len();
     if n == 0 {
         return 0.0;
@@ -229,7 +229,11 @@ pub fn score(a: &[u64], e_target: u64, config: &LossConfig) -> f64 {
     }
 }
 
-pub fn score_sub_tx(tx: &Transaction, sub_tx_input_indices: &[usize], config: &LossConfig) -> f64 {
+pub fn score_sub_tx(
+    tx: &Transaction,
+    sub_tx_input_indices: &[usize],
+    config: &EstimatorConfig,
+) -> f64 {
     let sub_tx_sum: u64 = sub_tx_input_indices.iter().map(|&i| tx.inputs[i]).sum();
 
     let other_inputs: Vec<u64> = tx
@@ -278,7 +282,7 @@ pub fn marginal_score(
     current_tx: &Transaction,
     new_inputs: &[u64],
     new_outputs: &[u64],
-    config: &LossConfig,
+    config: &EstimatorConfig,
 ) -> (f64, f64, f64) {
     let score_before = tx_signed_privacy(current_tx, config);
 
@@ -295,7 +299,7 @@ pub fn marginal_score(
 }
 
 /// Mean log₂ W_signed over all coins. 0 for degenerate txs.
-fn tx_signed_privacy(tx: &Transaction, config: &LossConfig) -> f64 {
+fn tx_signed_privacy(tx: &Transaction, config: &EstimatorConfig) -> f64 {
     let total_coins = tx.inputs.len() + tx.outputs.len();
     if total_coins < 2 {
         return 0.0;
@@ -321,7 +325,7 @@ pub struct RegimeInfo {
     pub dense_at_quartile: Option<bool>,
 }
 
-pub fn analyze_regime(tx: &Transaction, config: &LossConfig) -> RegimeInfo {
+pub fn analyze_regime(tx: &Transaction, config: &EstimatorConfig) -> RegimeInfo {
     let k = kappa(&tx.inputs).unwrap_or(f64::NAN);
     let is_radix = is_radix_like_any_base(&tx.inputs, config.radix_hw_threshold);
     let estimator = select_estimator(tx.inputs.len(), is_radix, config);
@@ -352,7 +356,7 @@ mod tests {
 
     #[test]
     fn test_score_zero_degenerate() {
-        let cfg = LossConfig::default();
+        let cfg = EstimatorConfig::default();
         assert_eq!(score(&[10, 20, 30], 100, &cfg), 0.0);
         assert_eq!(score(&[], 10, &cfg), 0.0);
         assert_eq!(score(&[10], 0, &cfg), 0.0);
@@ -360,7 +364,7 @@ mod tests {
 
     #[test]
     fn test_score_increases_with_n() {
-        let config = LossConfig::default();
+        let config = EstimatorConfig::default();
         let s10 = score(&(1..=10).collect::<Vec<u64>>(), 27, &config);
         let s20 = score(&(1..=20).collect::<Vec<u64>>(), 105, &config);
         assert!(s20 > s10, "s10={}, s20={}", s10, s20);
@@ -368,7 +372,7 @@ mod tests {
 
     #[test]
     fn test_select_estimator_branches() {
-        let mut cfg = LossConfig::default();
+        let mut cfg = EstimatorConfig::default();
 
         assert_eq!(select_estimator(8, false, &cfg), EstimatorChoice::ExactDp);
         assert_eq!(select_estimator(20, false, &cfg), EstimatorChoice::ExactDp);
@@ -397,9 +401,9 @@ mod tests {
     #[test]
     fn test_score_small_n_uses_exact_dp() {
         let a: Vec<u64> = (11..=26).collect();
-        let cfg = LossConfig {
+        let cfg = EstimatorConfig {
             radix_hw_threshold: 1,
-            ..LossConfig::default()
+            ..EstimatorConfig::default()
         };
         let target: u64 = a.iter().sum::<u64>() / 2;
         let regime = analyze_regime(&Transaction::new(a.clone(), vec![target]), &cfg);
@@ -411,7 +415,7 @@ mod tests {
     #[test]
     fn test_score_exact_dp_falls_back_when_table_too_big() {
         let a: Vec<u64> = vec![10_000_000, 20_000_000, 30_000_000, 40_000_000, 50_000_000];
-        let cfg = LossConfig {
+        let cfg = EstimatorConfig {
             exact_threshold: 20,
             dp_max_table: 100,
             lookup_k: 4,
@@ -424,7 +428,7 @@ mod tests {
     #[test]
     fn test_score_radix_uses_lookup() {
         let a: Vec<u64> = vec![1, 2, 4, 8, 16, 32, 64, 128, 256, 512];
-        let config = LossConfig {
+        let config = EstimatorConfig {
             radix_hw_threshold: 1,
             ..Default::default()
         };
@@ -435,7 +439,7 @@ mod tests {
     #[test]
     fn test_marginal_score_positive() {
         let base_tx = Transaction::new(vec![100, 200, 300], vec![150, 250, 200]);
-        let config = LossConfig::default();
+        let config = EstimatorConfig::default();
         let (before, after, _) = marginal_score(&base_tx, &[400, 500], &[450, 450], &config);
         assert!(after >= before);
     }
@@ -443,7 +447,7 @@ mod tests {
     #[test]
     fn test_score_sub_tx() {
         let tx = Transaction::new(vec![10, 20, 30, 40, 50], vec![30, 50, 70]);
-        let s = score_sub_tx(&tx, &[0, 1], &LossConfig::default());
+        let s = score_sub_tx(&tx, &[0, 1], &EstimatorConfig::default());
         assert!(s >= 0.0);
     }
 
@@ -451,9 +455,9 @@ mod tests {
     fn test_regime_info() {
         let tx = fixtures::maurer_fig2();
         // threshold=1 excludes values with ≥2 non-zero base-10 digits (default=2 passes them all).
-        let config = LossConfig {
+        let config = EstimatorConfig {
             radix_hw_threshold: 1,
-            ..LossConfig::default()
+            ..EstimatorConfig::default()
         };
         let regime = analyze_regime(&tx, &config);
         assert!(!regime.is_radix);
@@ -463,12 +467,12 @@ mod tests {
     #[test]
     fn test_equal_denominations_regime() {
         let tx = fixtures::equal_denominations();
-        let _ = analyze_regime(&tx, &LossConfig::default());
+        let _ = analyze_regime(&tx, &EstimatorConfig::default());
     }
 
     #[test]
     fn test_incremental_aggregation() {
-        let config = LossConfig::default();
+        let config = EstimatorConfig::default();
         let participants: Vec<(Vec<u64>, Vec<u64>)> = vec![
             (vec![100, 200], vec![150, 150]),
             (vec![300, 50], vec![200, 150]),
@@ -515,7 +519,7 @@ mod tests {
     fn test_estimate_density_exact_dp_small_n() {
         // W(5000) = C(10, 5) = 252 for 10×1000.
         let a: Vec<u64> = vec![1000; 10];
-        let cfg = LossConfig {
+        let cfg = EstimatorConfig {
             radix_hw_threshold: 0,
             ..Default::default()
         };
@@ -529,7 +533,7 @@ mod tests {
     #[test]
     fn test_estimate_density_target_out_of_range() {
         let a: Vec<u64> = vec![10, 20, 30];
-        let de = estimate_density(&a, 60, &LossConfig::default());
+        let de = estimate_density(&a, 60, &EstimatorConfig::default());
         assert_eq!(de.regime, Regime::Unknown);
         assert!(de.log_w.is_none());
         assert!(!de.reliable);
@@ -537,21 +541,21 @@ mod tests {
 
     #[test]
     fn test_estimate_density_empty_input() {
-        let de = estimate_density(&[], 100, &LossConfig::default());
+        let de = estimate_density(&[], 100, &EstimatorConfig::default());
         assert_eq!(de.regime, Regime::Unknown);
         assert!(!de.reliable);
     }
 
     #[test]
     fn test_estimate_density_zero_target() {
-        let de = estimate_density(&[1, 2, 3], 0, &LossConfig::default());
+        let de = estimate_density(&[1, 2, 3], 0, &EstimatorConfig::default());
         assert_eq!(de.regime, Regime::Unknown);
     }
 
     #[test]
     fn test_estimate_density_radix_path_dense() {
         let a: Vec<u64> = vec![8; 10];
-        let cfg = LossConfig {
+        let cfg = EstimatorConfig {
             radix_hw_threshold: 1,
             ..Default::default()
         };
@@ -565,7 +569,7 @@ mod tests {
     #[test]
     fn test_estimate_density_large_n_sasamoto_branch() {
         let a: Vec<u64> = (1..=25).collect();
-        let cfg = LossConfig {
+        let cfg = EstimatorConfig {
             radix_hw_threshold: 0,
             ..Default::default()
         };
@@ -579,7 +583,7 @@ mod tests {
     #[test]
     fn test_estimate_density_sparse_when_no_subsets() {
         let a: Vec<u64> = vec![1_000_003, 2_000_029, 3_000_131];
-        let de = estimate_density(&a, 1, &LossConfig::default());
+        let de = estimate_density(&a, 1, &EstimatorConfig::default());
         assert_ne!(de.regime, Regime::Dense);
     }
 
@@ -587,7 +591,7 @@ mod tests {
     fn test_score_matches_estimate_density() {
         let a: Vec<u64> = (1..=15).collect();
         let e = 60u64;
-        let cfg = LossConfig::default();
+        let cfg = EstimatorConfig::default();
         let s = score(&a, e, &cfg);
         let de = estimate_density(&a, e, &cfg);
         let expected = match de.log_w {
