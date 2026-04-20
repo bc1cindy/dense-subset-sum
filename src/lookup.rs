@@ -103,12 +103,15 @@ impl LookupConfig {
 }
 
 /// Exact W(E) by enumerating 2^N subsets. Max N ≈ 25 in practice.
-pub fn brute_force_w(a: &[u64], e_target: u64) -> u64 {
-    let n = a.len();
+pub fn brute_force_w(original_set: &[u64], e_target: u64) -> u64 {
+    let n = original_set.len();
     assert!(n <= 30, "brute_force_w: N={} too large (max 30)", n);
     let mut count = 0u64;
     for mask in 0..(1u64 << n) {
-        let sum: u64 = (0..n).filter(|&j| mask & (1 << j) != 0).map(|j| a[j]).sum();
+        let sum: u64 = (0..n)
+            .filter(|&j| mask & (1 << j) != 0)
+            .map(|j| original_set[j])
+            .sum();
         if sum == e_target {
             count += 1;
         }
@@ -121,36 +124,36 @@ pub fn brute_force_w(a: &[u64], e_target: u64) -> u64 {
 /// Returns `u128` because `W > 2^64` is reachable for N ≥ 64. Callers that cast
 /// to `f64` lose precision above 2^53 (f64 mantissa); that's acceptable for
 /// ratios/error reports but not for equality checks on large W.
-pub fn lookup_w(a: &[u64], e_target: u64, block_size: usize) -> Option<u128> {
-    lookup_w_with_config(a, e_target, block_size, &LookupConfig::default())
+pub fn lookup_w(original_set: &[u64], e_target: u64, block_size: usize) -> Option<u128> {
+    lookup_w_with_config(original_set, e_target, block_size, &LookupConfig::default())
 }
 
 /// Like `lookup_w`, but with an explicit memory/entry max.
 pub fn lookup_w_with_config(
-    a: &[u64],
+    original_set: &[u64],
     e_target: u64,
     block_size: usize,
     cfg: &LookupConfig,
 ) -> Option<u128> {
-    if a.is_empty() {
+    if original_set.is_empty() {
         return None;
     }
-    let combined = full_sumset(a, block_size, cfg.max_entries);
+    let combined = full_sumset(original_set, block_size, cfg.max_entries);
     Some(*combined.get(&e_target).unwrap_or(&0))
 }
 
-pub fn log_lookup_w(a: &[u64], e_target: u64, block_size: usize) -> Option<f64> {
-    log_lookup_w_with_config(a, e_target, block_size, &LookupConfig::default())
+pub fn log_lookup_w(original_set: &[u64], e_target: u64, block_size: usize) -> Option<f64> {
+    log_lookup_w_with_config(original_set, e_target, block_size, &LookupConfig::default())
 }
 
 /// Like `log_lookup_w`, but with an explicit memory/entry max.
 pub fn log_lookup_w_with_config(
-    a: &[u64],
+    original_set: &[u64],
     e_target: u64,
     block_size: usize,
     cfg: &LookupConfig,
 ) -> Option<f64> {
-    let w = lookup_w_with_config(a, e_target, block_size, cfg)?;
+    let w = lookup_w_with_config(original_set, e_target, block_size, cfg)?;
     if w == 0 {
         Some(f64::NEG_INFINITY)
     } else {
@@ -210,14 +213,18 @@ pub fn log_lookup_w_signed_target_aware_with_config(
 
 /// Exact W(E) via DP: O(N · sum_max). `None` when sum_max exceeds `max_table_size`.
 ///
+/// `original_set` is the input multiset (values to choose subsets of), not a
+/// precomputed sumset. Exact alternative to [`lookup_w`], kept for cross-validation —
+/// the two methods converge on the same count via different paths.
+///
 /// Returns `u128` to represent the exact count up to 2^N. Casting to `f64`
 /// loses precision above 2^53; fine for error ratios, not for equality.
-pub fn dp_w(a: &[u64], e_target: u64, max_table_size: usize) -> Option<u128> {
-    if a.is_empty() {
+pub fn dp_w(original_set: &[u64], e_target: u64, max_table_size: usize) -> Option<u128> {
+    if original_set.is_empty() {
         return None;
     }
 
-    let g = gcd_slice(a);
+    let g = gcd_slice(original_set);
     if g == 0 {
         return None;
     }
@@ -225,9 +232,9 @@ pub fn dp_w(a: &[u64], e_target: u64, max_table_size: usize) -> Option<u128> {
         return Some(0);
     }
 
-    let a_norm: Vec<u64> = a.iter().map(|&v| v / g).collect();
+    let normalized: Vec<u64> = original_set.iter().map(|&v| v / g).collect();
     let e_norm = e_target / g;
-    let sum_max: u64 = a_norm.iter().sum();
+    let sum_max: u64 = normalized.iter().sum();
 
     if e_norm > sum_max {
         return Some(0);
@@ -240,7 +247,7 @@ pub fn dp_w(a: &[u64], e_target: u64, max_table_size: usize) -> Option<u128> {
     let mut dp = vec![0u128; sz];
     dp[0] = 1;
 
-    for &val in &a_norm {
+    for &val in &normalized {
         let v = val as usize;
         for j in (v..sz).rev() {
             dp[j] += dp[j - v];
@@ -250,8 +257,8 @@ pub fn dp_w(a: &[u64], e_target: u64, max_table_size: usize) -> Option<u128> {
     Some(dp[e_norm as usize])
 }
 
-pub fn log_dp_w(a: &[u64], e_target: u64, max_table_size: usize) -> Option<f64> {
-    let w = dp_w(a, e_target, max_table_size)?;
+pub fn log_dp_w(original_set: &[u64], e_target: u64, max_table_size: usize) -> Option<f64> {
+    let w = dp_w(original_set, e_target, max_table_size)?;
     if w == 0 {
         Some(f64::NEG_INFINITY)
     } else {
@@ -322,14 +329,14 @@ fn convolve(
 }
 
 /// Block-convolved sumset. Over `max_entries`, remaining blocks fold naively as {0, v_i} — still a valid W lower bound.
-fn full_sumset(a: &[u64], block_size: usize, max_entries: usize) -> HashMap<u64, u128> {
-    if a.is_empty() {
+fn full_sumset(original_set: &[u64], block_size: usize, max_entries: usize) -> HashMap<u64, u128> {
+    if original_set.is_empty() {
         let mut m = HashMap::new();
         m.insert(0u64, 1u128);
         return m;
     }
-    let k = block_size.max(1).min(a.len());
-    let blocks: Vec<&[u64]> = a.chunks(k).collect();
+    let k = block_size.max(1).min(original_set.len());
+    let blocks: Vec<&[u64]> = original_set.chunks(k).collect();
     let mut combined = block_sumset(blocks[0]);
     for block in &blocks[1..] {
         let block_sums = if combined.len() >= max_entries {
@@ -359,18 +366,18 @@ fn full_sumset(a: &[u64], block_size: usize, max_entries: usize) -> HashMap<u64,
 
 /// Proximity-pruned variant: keeps entries closest to `target` when over `max_entries`.
 fn full_sumset_near_target(
-    a: &[u64],
+    original_set: &[u64],
     block_size: usize,
     max_entries: usize,
     target: u64,
 ) -> HashMap<u64, u128> {
-    if a.is_empty() {
+    if original_set.is_empty() {
         let mut m = HashMap::new();
         m.insert(0u64, 1u128);
         return m;
     }
-    let k = block_size.max(1).min(a.len());
-    let blocks: Vec<&[u64]> = a.chunks(k).collect();
+    let k = block_size.max(1).min(original_set.len());
+    let blocks: Vec<&[u64]> = original_set.chunks(k).collect();
     let mut combined = block_sumset(blocks[0]);
     for block in &blocks[1..] {
         let block_sums = if combined.len() >= max_entries {
