@@ -6,7 +6,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 use crate::stats::{median, spearman_correlation};
-use crate::{dp_w, kappa, log_w_for_e_sat, lookup_w};
+use crate::{LookupConfig, dp_w, kappa, log_w_for_e_sat, lookup_w, lookup_w_with_config};
 
 /// Ground truth for `w_exact`: exhaustive enumeration or Monte Carlo estimate.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -65,6 +65,19 @@ pub fn compare(
     dp_max: usize,
     label: &str,
 ) -> ComparisonReport {
+    compare_with_config(a, min_w, lookup_k, &LookupConfig::default(), dp_max, label)
+}
+
+/// Like [`compare`], but threads a [`LookupConfig`] into the lookup estimator
+/// (memory cap and `sat_per_bin` output-binning).
+pub fn compare_with_config(
+    a: &[u64],
+    min_w: u64,
+    lookup_k: usize,
+    cfg: &LookupConfig,
+    dp_max: usize,
+    label: &str,
+) -> ComparisonReport {
     let n = a.len();
     assert!(
         n <= 25,
@@ -84,6 +97,7 @@ pub fn compare(
         1.0,
         min_w,
         lookup_k,
+        cfg,
         dp_max,
         label,
         CompareMode::Exhaustive,
@@ -102,6 +116,7 @@ pub(super) fn build_report_from_counts(
     scale: f64,
     min_count: u64,
     lookup_k: usize,
+    cfg: &LookupConfig,
     dp_max: usize,
     label: &str,
     mode: CompareMode,
@@ -125,7 +140,7 @@ pub(super) fn build_report_from_counts(
     for &(e, c) in &targets {
         let w_ref = c as f64 * scale;
         let w_sas = log_w_for_e_sat(a, e).map(|lw| lw.exp());
-        let w_lkp = lookup_w(a, e, lookup_k);
+        let w_lkp = lookup_w_with_config(a, e, lookup_k, cfg);
         let w_dp = dp_w(a, e, dp_max);
 
         let err_sas = w_sas.map(|ws| (ws - w_ref) / w_ref);

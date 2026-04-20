@@ -1,6 +1,6 @@
 //! W(E)-vs-ground-truth + W-vs-mappings benchmark subcommands.
 
-use dense_subset_sum::{comparison, fixtures, validation};
+use dense_subset_sum::{LookupConfig, comparison, fixtures, validation};
 
 use super::parse_values;
 
@@ -131,6 +131,8 @@ pub(crate) fn cmd_compare_empirical(
     divisor: u64,
     samples: u64,
     timeout_ms: u64,
+    lookup_memory_mb: Option<usize>,
+    sat_per_bin: u64,
 ) {
     let default_path = std::path::Path::new(comparison::EmpiricalDistribution::DEFAULT_CJA_PATH);
     let path = bin.unwrap_or(default_path);
@@ -177,9 +179,20 @@ pub(crate) fn cmd_compare_empirical(
         );
         std::process::exit(1);
     }
+
+    let cfg = match lookup_memory_mb {
+        Some(mb) => LookupConfig::from_memory_bytes(mb.saturating_mul(1024 * 1024)),
+        None => LookupConfig::default(),
+    }
+    .with_sat_per_bin(sat_per_bin);
+    println!(
+        "Lookup config: max_memory_bytes={}, max_entries={}, sat_per_bin={}",
+        cfg.max_memory_bytes, cfg.max_entries, cfg.sat_per_bin,
+    );
+
     let label = format!("empirical_cja_N{}_seed{}_div{}", n, seed, divisor);
     let report = if values.len() <= 25 {
-        comparison::compare(&values, min_w, block_size, 10_000_000, &label)
+        comparison::compare_with_config(&values, min_w, block_size, &cfg, 10_000_000, &label)
     } else {
         println!(
             "N={} > 25: switching to Monte Carlo ({} samples, {} ms cap)",
@@ -187,8 +200,8 @@ pub(crate) fn cmd_compare_empirical(
             samples,
             timeout_ms
         );
-        comparison::compare_monte_carlo(
-            &values, min_w, block_size, 10_000_000, &label, samples, timeout_ms, seed,
+        comparison::compare_monte_carlo_with_config(
+            &values, min_w, block_size, &cfg, 10_000_000, &label, samples, timeout_ms, seed,
         )
     };
     comparison::print_report(&report);
