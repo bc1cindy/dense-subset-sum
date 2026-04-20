@@ -1,7 +1,7 @@
 //! CLI subcommand implementations. One `cmd_*` fn per `Command` variant.
 //!
 //! Split across three files by domain:
-//! - `analysis`: per-tx reports, per-coin scores, calibration, splits.
+//! - `analysis`: per-tx reports, per-coin measurements, estimator correlation, splits.
 //! - `compare`: W(E)-vs-ground-truth + W-vs-mappings benchmarks.
 //! - `density`: κ/κ_c regime tooling and subset-size sweeps.
 //!
@@ -13,8 +13,8 @@ mod compare;
 mod density;
 
 pub(crate) use analysis::{
-    cmd_analyze_tx, cmd_calibrate_privacy, cmd_coin_scores, cmd_cost, cmd_estimate,
-    cmd_full_report, cmd_marginal_score, cmd_suggest_split,
+    cmd_analyze_tx, cmd_coin_measures, cmd_compare_augmented, cmd_correlate_estimators,
+    cmd_estimate, cmd_full_report, cmd_measure, cmd_suggest_split,
 };
 pub(crate) use compare::{
     cmd_compare, cmd_compare_fixtures, cmd_compare_random, cmd_compare_synthetic,

@@ -23,7 +23,7 @@ Computing `W(E)` exactly is also exponential in the worst case, so the tool runs
 2. **Block-convolution lookup** for medium sets — a proven lower bound.
 3. **Asymptotic approximation** (Sasamoto / Toyoizumi / Nishimori) for large CoinJoins — fast, accurate at scale, but an approximation with error at finite N.
 
-Commands that print all tiers side-by-side (`compare`, `full-report`) keep disagreements between estimators visible. Commands that return a single number (`cost`, `density`) pick the tier by regime and fall back to `min(Sasamoto, lookup)` once `N` is large enough for the asymptotic regime, so the reported number is never more optimistic than the proven lookup lower bound.
+Commands that print all tiers side-by-side (`compare`, `full-report`) keep disagreements between estimators visible. Commands that return a single number (`measure`, `density`) pick the tier by regime and fall back to `min(Sasamoto, lookup)` once `N` is large enough for the asymptotic regime, so the reported number is never more optimistic than the proven lookup lower bound.
 
 ## Install
 
@@ -61,14 +61,14 @@ $BIN full-report --tx-json path/to/tx.json
 
 ```bash
 # Whole-tx mean signed log₂W and per-coin breakdown
-$BIN cost         -i ... -o ...
-$BIN coin-scores  -i ... -o ...
+$BIN measure       -i ... -o ...
+$BIN coin-measures -i ... -o ...
 
 # Count every plausible input→output mapping (small tx only)
-$BIN analyze-tx   -i ... -o ...
+$BIN analyze-tx    -i ... -o ...
 
 # Mean signed log₂W: augmented tx vs base tx (reports before/after/delta)
-$BIN marginal-score -i ... -o ... --new-inputs 50000000 --new-outputs 50000000
+$BIN compare-augmented -i ... -o ... --new-inputs 50000000 --new-outputs 50000000
 
 # Rank change decompositions by mean signed log₂W
 $BIN suggest-split -i ... -o ... --change 7168 --max-pieces 6
@@ -116,7 +116,7 @@ Accuracy columns:
 - **`*_err`** — `(estimator − W_exact) / W_exact`, signed. Approximation error.
 - **spearman** — rank correlation with ground truth (1.0 = perfect ordering). High Spearman with a big `*_err` means the approximation ranks things correctly but has a systematic scale bias.
 
-### Per-coin scores
+### Per-coin measurements
 
 - **signed multiset probe** — for each coin, "if I remove this coin, how many ways can the others be split (with signs) so the books still balance?"
 - **log₂W_signed** — the log of that count. `N/A` = unreachable (no valid partition of the other coins balances the books without this one).
@@ -153,14 +153,14 @@ estimator::estimate (log₂/N): 0.3401
 
 `estimator_picked` shows which tier was used. `κ > κ_c` at this E means sparse — `W = 0` at a single point doesn't contradict a globally dense tx. `estimator::estimate` reports `log₂ W / N`, i.e. log₂W normalized per coin (comparable across transactions of different sizes).
 
-### `coin-scores`
+### `coin-measures`
 
 ```
   in    0   50000000   5.907
   in    5   49000000   N/A
 ```
 
-Coins of the same value share a score. `N/A` = no partition reaches this coin's balance target.
+Coins of the same value share a measurement. `N/A` = no partition reaches this coin's balance target.
 
 ### `compare-wasabi2`
 
@@ -173,7 +173,7 @@ idx  in  out count  balance     lw_sas   lw_in   lw_out  lw_comb
 
 Each row is a unique sub-transaction. `lw_sas / lw_in / lw_out / lw_comb` are `log W` from Sasamoto, lookup on inputs, lookup on outputs, and combined. `-inf` means no subset reaches that target on the lattice. SKIPPED = exceeds `--max-coins` (default 26).
 
-### `marginal-score`
+### `compare-augmented`
 
 ```
 Base tx: w2_6a6dcc22_17in6out (17 in / 6 out)
@@ -192,7 +192,7 @@ Reports how the mean signed log₂W per coin changes when the augmented coins ar
 - **after**  — same mean, recomputed on the *augmented* tx (current + `--new-inputs` + `--new-outputs`).
 - **delta**  — `after − before`, in bits.
 
-The score is the *mean* across all coins, so a positive delta can mask a specific UTXO that gained less than the others. Run `coin-scores` on the augmented tx to see the per-coin breakdown. Interpretation of the delta is left to the caller; this command is a measurement, not a decision rule.
+The reported number is the *mean* across all coins, so a positive delta can mask a specific UTXO that gained less than the others. Run `coin-measures` on the augmented tx to see the per-coin breakdown. Interpretation of the delta is left to the caller; this command is a measurement, not a decision rule.
 
 ### `dense-boundary` / `subset-density`
 
@@ -209,7 +209,7 @@ The band of E values where random subsets land in the dense regime, and the subs
 No. `κ < κ_c` describes the E *band*; `W(E) = 0` describes one E *point*. A sparse midpoint in an otherwise dense band is normal for irregular inputs. Use `dense-boundary` to inspect the band.
 
 **Sasamoto returns `-inf` or a tiny number. Why?**
-The asymptotic approximation requires the target to land on the GCD lattice of the inputs; when it doesn't, `-inf` is reported by design. When N is too small or the distribution is irregular, Sasamoto can also underestimate. Inspection commands print Sasamoto and lookup side-by-side so this stays visible, and scoring commands fall back to `min(Sasamoto, lookup)` at large N so a broken Sasamoto only makes that single-number result stricter.
+The asymptotic approximation requires the target to land on the GCD lattice of the inputs; when it doesn't, `-inf` is reported by design. When N is too small or the distribution is irregular, Sasamoto can also underestimate. Inspection commands print Sasamoto and lookup side-by-side so this stays visible, and single-number commands fall back to `min(Sasamoto, lookup)` at large N so a broken Sasamoto only makes that result stricter.
 
 **Sasamoto's error is 99% but Spearman is 1.0. How?**
 The approximation can have a systematic scale bias while still ranking E values correctly. Spearman captures the ranking (useful for comparing sub-transactions); absolute error captures the bias. The tool uses Sasamoto for the former, lookup/DP for the latter.
@@ -235,7 +235,7 @@ Any indexer output mapping to `Vec<u64>` of satoshis drops in. The scale switch 
 ## Design notes
 
 - **Proven vs approximated.** DP and lookup are proven lower bounds on W(E). Sasamoto is an asymptotic approximation with finite-N error. The tool labels every value with the tier that produced it and never reports an approximation as if it were a proof.
-- **Inspection vs scoring.** Inspection commands print every tractable tier so disagreements are visible. Scoring commands return a single number and fall back to `min(Sasamoto, lookup)` once `N` is in the asymptotic regime, so a broken approximation can only make that number stricter.
+- **Tiered vs single-number.** Tiered commands print every tractable tier so disagreements are visible. Single-number commands fall back to `min(Sasamoto, lookup)` once `N` is in the asymptotic regime, so a broken approximation can only make that number stricter.
 - **Fail-closed.** No sound positive lower bound ⇒ the regime is `Sparse` or `Unknown`, never a false `Dense`.
 - **Radix composite.** For equal-denomination CoinJoins, a dedicated detector adds a conservative lower bound from denomination structure.
 

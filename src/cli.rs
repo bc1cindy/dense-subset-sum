@@ -3,10 +3,10 @@
 use clap::{Parser, Subcommand};
 
 use crate::commands::{
-    cmd_analyze_tx, cmd_calibrate_privacy, cmd_coin_scores, cmd_compare, cmd_compare_fixtures,
-    cmd_compare_random, cmd_compare_synthetic, cmd_compare_wasabi2, cmd_cost, cmd_dense_boundary,
-    cmd_density, cmd_density_scan, cmd_estimate, cmd_full_report, cmd_kappa, cmd_marginal_score,
-    cmd_subset_density, cmd_suggest_split, cmd_validate,
+    cmd_analyze_tx, cmd_coin_measures, cmd_compare, cmd_compare_augmented, cmd_compare_fixtures,
+    cmd_compare_random, cmd_compare_synthetic, cmd_compare_wasabi2, cmd_correlate_estimators,
+    cmd_dense_boundary, cmd_density, cmd_density_scan, cmd_estimate, cmd_full_report, cmd_kappa,
+    cmd_measure, cmd_subset_density, cmd_suggest_split, cmd_validate,
 };
 
 #[derive(Parser)]
@@ -77,7 +77,7 @@ enum Command {
         target: Option<u64>,
     },
     /// Per-coin mean signed log₂W for a transaction
-    Cost {
+    Measure {
         /// Comma-separated input values (satoshis)
         #[arg(short, long)]
         inputs: String,
@@ -146,7 +146,7 @@ enum Command {
         fee_handling: String,
     },
     /// Per-coin W estimates (signed ±multiset probe) for every input and output.
-    CoinScores {
+    CoinMeasures {
         /// Wasabi2 fixture label (e.g. w2_6a6dcc22_17in6out). Overrides --inputs/--outputs.
         #[arg(long)]
         tx_label: Option<String>,
@@ -188,7 +188,7 @@ enum Command {
         seed: u64,
     },
     /// Spearman correlation: cheap estimators vs Boltzmann ground truth (log |M_non_derived|).
-    CalibratePrivacy {
+    CorrelateEstimators {
         #[arg(long, default_value = "26")]
         max_coins: usize,
         #[arg(short = 'k', long, default_value = "10")]
@@ -268,7 +268,7 @@ enum Command {
         dp_max: usize,
     },
     /// Mean signed log₂W per coin: augmented tx vs base tx (reports before/after/delta).
-    MarginalScore {
+    CompareAugmented {
         /// Wasabi2 fixture label for the current tx. Overrides --inputs/--outputs.
         #[arg(long)]
         tx_label: Option<String>,
@@ -287,7 +287,7 @@ enum Command {
         /// Outputs you are considering adding (satoshis, comma-separated).
         #[arg(long, default_value = "")]
         new_outputs: String,
-        /// Block size for lookup table in the signed scoring probe.
+        /// Block size for lookup table in the signed probe.
         #[arg(short = 'k', long, default_value = "10")]
         block_size: usize,
     },
@@ -305,7 +305,7 @@ enum Command {
         /// Maximum number of pieces in the split (1..=8).
         #[arg(short = 'p', long, default_value = "4")]
         max_pieces: usize,
-        /// Block size for lookup table in the signed scoring probe.
+        /// Block size for lookup table in the signed probe.
         #[arg(short = 'k', long, default_value = "3")]
         block_size: usize,
     },
@@ -330,11 +330,11 @@ pub fn run(cli: Cli) {
             block_size,
         } => cmd_validate(&values, min_w, block_size),
         Command::Kappa { values, target } => cmd_kappa(&values, target),
-        Command::Cost {
+        Command::Measure {
             inputs,
             outputs,
             block_size,
-        } => cmd_cost(&inputs, &outputs, block_size),
+        } => cmd_measure(&inputs, &outputs, block_size),
         Command::Compare {
             values,
             min_w,
@@ -355,13 +355,13 @@ pub fn run(cli: Cli) {
             block_size,
             fee_handling,
         } => cmd_compare_wasabi2(max_coins, block_size, &fee_handling),
-        Command::CoinScores {
+        Command::CoinMeasures {
             tx_label,
             tx_json,
             inputs,
             outputs,
             block_size,
-        } => cmd_coin_scores(
+        } => cmd_coin_measures(
             tx_label.as_deref(),
             tx_json.as_deref(),
             &inputs,
@@ -393,7 +393,7 @@ pub fn run(cli: Cli) {
             block_size,
             dp_max,
         } => cmd_compare_synthetic(n, l_max, seed, min_w, block_size, dp_max),
-        Command::MarginalScore {
+        Command::CompareAugmented {
             tx_label,
             tx_json,
             inputs,
@@ -401,7 +401,7 @@ pub fn run(cli: Cli) {
             new_inputs,
             new_outputs,
             block_size,
-        } => cmd_marginal_score(
+        } => cmd_compare_augmented(
             tx_label.as_deref(),
             tx_json.as_deref(),
             &inputs,
@@ -417,10 +417,10 @@ pub fn run(cli: Cli) {
             max_pieces,
             block_size,
         } => cmd_suggest_split(&inputs, &outputs, change, max_pieces, block_size),
-        Command::CalibratePrivacy {
+        Command::CorrelateEstimators {
             max_coins,
             block_size,
-        } => cmd_calibrate_privacy(max_coins, block_size),
+        } => cmd_correlate_estimators(max_coins, block_size),
         Command::DenseBoundary {
             tx_label,
             tx_json,

@@ -1,4 +1,4 @@
-//! Per-tx full reports, per-coin scores, privacy calibration, and split suggestions.
+//! Per-tx full reports, per-coin measurements, estimator correlation, and split suggestions.
 
 use dense_subset_sum::{
     brute_force_w, change_split, density_regime, estimator, fixtures, kappa, log_lookup_w,
@@ -9,7 +9,7 @@ use super::{
     Transaction, fmt_log_w, parse_tx, parse_values, per_coin_summary, resolve_tx, spearman_opt,
 };
 
-pub(crate) fn cmd_marginal_score(
+pub(crate) fn cmd_compare_augmented(
     tx_label: Option<&str>,
     tx_json: Option<&std::path::Path>,
     inputs_str: &str,
@@ -146,7 +146,7 @@ pub(crate) fn cmd_estimate(inputs_str: &str, outputs_str: &str, block_size: usiz
     }
 }
 
-pub(crate) fn cmd_cost(inputs_str: &str, outputs_str: &str, block_size: usize) {
+pub(crate) fn cmd_measure(inputs_str: &str, outputs_str: &str, block_size: usize) {
     let tx = parse_tx(inputs_str, outputs_str);
 
     let config = estimator::EstimatorConfig {
@@ -167,7 +167,7 @@ pub(crate) fn cmd_cost(inputs_str: &str, outputs_str: &str, block_size: usize) {
         regime.estimator.as_str()
     );
 
-    println!("\n{:>12}  {:>10}", "Input", "Score");
+    println!("\n{:>12}  {:>10}", "Input", "log₂W/N");
     println!("{:─<24}", "");
     for (i, &val) in tx.inputs.iter().enumerate() {
         let s = estimator::estimate_sub_tx(&tx, &[i], &config);
@@ -175,10 +175,10 @@ pub(crate) fn cmd_cost(inputs_str: &str, outputs_str: &str, block_size: usize) {
     }
 
     let avg = estimator::estimate(&tx.inputs, tx.inputs.iter().sum::<u64>() / 2, &config);
-    println!("\nMidpoint score: {:.4}", avg);
+    println!("\nMidpoint estimate: {:.4}", avg);
 }
 
-pub(crate) fn cmd_coin_scores(
+pub(crate) fn cmd_coin_measures(
     tx_label: Option<&str>,
     tx_json: Option<&std::path::Path>,
     inputs_str: &str,
@@ -302,7 +302,7 @@ pub(crate) fn cmd_full_report(
     }
 }
 
-pub(crate) fn cmd_calibrate_privacy(max_coins: usize, block_size: usize) {
+pub(crate) fn cmd_correlate_estimators(max_coins: usize, block_size: usize) {
     let ln2 = 2f64.ln();
     let all: Vec<(&'static str, Transaction)> = fixtures::all_wasabi2_positive_cjtxs()
         .into_iter()
