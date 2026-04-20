@@ -4,7 +4,8 @@ use std::collections::HashMap;
 
 use crate::sasamoto::{gcd_slice, log_w_signed_sasamoto};
 
-/// 2^22 ≈ 4M entries fits in ~100MB; unbounded N≥20 with sat-scale values hits 10^9 entries (OOM).
+/// Default sumset cap (~100MB at nominal entry size). Override via `LookupConfig`
+/// (memory/entries) and/or `sat_per_bin` to trade exactness for range.
 pub const DEFAULT_MAX_ENTRIES: usize = 4_194_304;
 
 /// Nominal per-entry size: `u64` sum + `u128` count. Real `HashMap` has bucket
@@ -16,10 +17,19 @@ const ENTRY_SIZE_BYTES: usize = std::mem::size_of::<(u64, u128)>();
 /// `max_entries` are exposed so callers can reason about whichever resource is
 /// scarce; use `from_memory_bytes` or `from_max_entries` to keep them consistent.
 /// `Default` reproduces 2^22-entry max (~100MB nominal).
+///
+/// `sat_per_bin` quantizes the sumset output into a histogram: each key is
+/// `⌊sum / sat_per_bin⌋` and the stored count is the number of subsets whose
+/// sum lands in that bucket. `sat_per_bin = 1` is exact point-W; `> 1`
+/// chops the lower-order bits of the sumset, shrinking memory roughly
+/// linearly. Inputs stay exact; binning happens on sumset keys after each
+/// block join, so bin-aligned inputs incur no loss while unaligned inputs
+/// carry a per-block-boundary rounding error of at most one bin.
 #[derive(Debug, Clone)]
 pub struct LookupConfig {
     pub max_memory_bytes: usize,
     pub max_entries: usize,
+    pub sat_per_bin: u64,
 }
 
 impl Default for LookupConfig {
@@ -27,6 +37,7 @@ impl Default for LookupConfig {
         Self {
             max_memory_bytes: DEFAULT_MAX_ENTRIES * ENTRY_SIZE_BYTES,
             max_entries: DEFAULT_MAX_ENTRIES,
+            sat_per_bin: 1,
         }
     }
 }
@@ -36,6 +47,7 @@ impl LookupConfig {
         Self {
             max_memory_bytes: bytes,
             max_entries: bytes / ENTRY_SIZE_BYTES,
+            sat_per_bin: 1,
         }
     }
 
@@ -43,7 +55,16 @@ impl LookupConfig {
         Self {
             max_memory_bytes: n * ENTRY_SIZE_BYTES,
             max_entries: n,
+            sat_per_bin: 1,
         }
+    }
+
+    /// Quantize the output sumset into `bin`-sized buckets (`key = ⌊sum/bin⌋`).
+    /// `1` disables binning; `≥ 2` returns histogram bucket counts instead of
+    /// exact per-E W values.
+    pub fn with_sat_per_bin(mut self, bin: u64) -> Self {
+        self.sat_per_bin = bin.max(1);
+        self
     }
 }
 
@@ -71,6 +92,11 @@ pub fn lookup_w(a: &[u64], e_target: u64, block_size: usize) -> Option<u128> {
 }
 
 /// Like `lookup_w`, but with an explicit memory/entry max.
+///
+/// When `cfg.sat_per_bin > 1`, the sumset keys are quantized to
+/// `⌊sum / sat_per_bin⌋` after each block join and the returned count is the
+/// histogram bucket at `⌊e_target / sat_per_bin⌋` — i.e. the number of
+/// subsets whose sum lies in `[k·bin, (k+1)·bin)`, not point W(E).
 pub fn lookup_w_with_config(
     a: &[u64],
     e_target: u64,
@@ -80,8 +106,9 @@ pub fn lookup_w_with_config(
     if a.is_empty() {
         return None;
     }
-    let combined = full_sumset(a, block_size, cfg.max_entries);
-    Some(*combined.get(&e_target).unwrap_or(&0))
+    let bin = cfg.sat_per_bin.max(1);
+    let combined = full_sumset(a, block_size, cfg.max_entries, bin);
+    Some(*combined.get(&(e_target / bin)).unwrap_or(&0))
 }
 
 pub fn log_lookup_w(a: &[u64], e_target: u64, block_size: usize) -> Option<f64> {
@@ -121,7 +148,12 @@ pub fn log_lookup_w_signed_target_aware(
     )
 }
 
-/// Like `log_lookup_w_signed_target_aware`, but with an explicit memory/entry cap.
+/// Like `log_lookup_w_signed_target_aware`, but with an explicit memory/entry max.
+///
+/// When `cfg.sat_per_bin > 1`, each side's sumset is quantized into
+/// `⌊sum / sat_per_bin⌋` histogram buckets and `target` is mapped to
+/// `⌊target / sat_per_bin⌋` (sign-preserving). The result is the log of the
+/// bucket count at the signed bin offset, not point W.
 pub fn log_lookup_w_signed_target_aware_with_config(
     positives: &[u64],
     negatives: &[u64],
@@ -129,16 +161,19 @@ pub fn log_lookup_w_signed_target_aware_with_config(
     block_size: usize,
     cfg: &LookupConfig,
 ) -> Option<f64> {
-    let abs_target = target.unsigned_abs();
-    let pos_target = if target >= 0 { abs_target } else { 0 };
-    let neg_target = if target < 0 { abs_target } else { 0 };
+    let bin = cfg.sat_per_bin.max(1);
+    let target_q: i64 = target / bin as i64;
 
-    let pos_sums = full_sumset_near_target(positives, block_size, cfg.max_entries, pos_target);
-    let neg_sums = full_sumset_near_target(negatives, block_size, cfg.max_entries, neg_target);
+    let abs_target = target_q.unsigned_abs();
+    let pos_target = if target_q >= 0 { abs_target } else { 0 };
+    let neg_target = if target_q < 0 { abs_target } else { 0 };
+
+    let pos_sums = full_sumset_near_target(positives, block_size, cfg.max_entries, pos_target, bin);
+    let neg_sums = full_sumset_near_target(negatives, block_size, cfg.max_entries, neg_target, bin);
 
     let mut total: u128 = 0;
     for (&s_pos, &c_pos) in &pos_sums {
-        let s_neg_required = (s_pos as i64).checked_sub(target)?;
+        let s_neg_required = (s_pos as i64).checked_sub(target_q)?;
         if s_neg_required < 0 {
             continue;
         }
@@ -301,8 +336,25 @@ fn convolve(
     convolve_capped(a, b, max_entries)
 }
 
-/// Block-convolved sumset. Over `max_entries`, remaining blocks fold naively as {0, v_i} — still a valid W lower bound.
-fn full_sumset(a: &[u64], block_size: usize, max_entries: usize) -> HashMap<u64, u128> {
+/// Quantize sumset keys into `⌊k / bin⌋` buckets, merging counts. Identity when `bin ≤ 1`.
+fn bin_keys(m: HashMap<u64, u128>, bin: u64) -> HashMap<u64, u128> {
+    if bin <= 1 {
+        return m;
+    }
+    let mut result: HashMap<u64, u128> = HashMap::with_capacity(m.len());
+    for (k, c) in m {
+        *result.entry(k / bin).or_insert(0) += c;
+    }
+    result
+}
+
+/// Block-convolved sumset with output-level binning. Each block's exact sumset
+/// is quantized to `⌊sum / bin⌋` before joining the accumulator, so the
+/// accumulator is in bin-index space throughout. `bin = 1` is exact point-W;
+/// `bin > 1` yields a histogram with up to ±1 bin rounding per block join.
+/// Over `max_entries`, remaining elements fold naively in bin space.
+/// Callers must pass `bin >= 1`; the public wrappers clamp before calling.
+fn full_sumset(a: &[u64], block_size: usize, max_entries: usize, bin: u64) -> HashMap<u64, u128> {
     if a.is_empty() {
         let mut m = HashMap::new();
         m.insert(0u64, 1u128);
@@ -310,15 +362,16 @@ fn full_sumset(a: &[u64], block_size: usize, max_entries: usize) -> HashMap<u64,
     }
     let k = block_size.max(1).min(a.len());
     let blocks: Vec<&[u64]> = a.chunks(k).collect();
-    let mut combined = block_sumset(blocks[0]);
+    let mut combined = bin_keys(block_sumset(blocks[0]), bin);
     for block in &blocks[1..] {
         let block_sums = if combined.len() >= max_entries {
             let mut coarse = HashMap::new();
             coarse.insert(0u64, 1u128);
             for &v in *block {
+                let v_bin = v / bin;
                 let mut next = coarse.clone();
                 for (&s, &c) in &coarse {
-                    *next.entry(s + v).or_insert(0) += c;
+                    *next.entry(s + v_bin).or_insert(0) += c;
                 }
                 coarse = next;
                 if coarse.len() >= max_entries {
@@ -327,7 +380,7 @@ fn full_sumset(a: &[u64], block_size: usize, max_entries: usize) -> HashMap<u64,
             }
             coarse
         } else {
-            block_sumset(block)
+            bin_keys(block_sumset(block), bin)
         };
         combined = convolve(&combined, &block_sums, max_entries);
         if combined.len() >= max_entries {
@@ -337,12 +390,15 @@ fn full_sumset(a: &[u64], block_size: usize, max_entries: usize) -> HashMap<u64,
     combined
 }
 
-/// Proximity-pruned variant: keeps entries closest to `target` when over `max_entries`.
+/// Proximity-pruned variant: keeps entries closest to `target` (expressed in
+/// bin-index space) when over `max_entries`. Binning semantics match
+/// `full_sumset`; callers must pass `bin >= 1`.
 fn full_sumset_near_target(
     a: &[u64],
     block_size: usize,
     max_entries: usize,
     target: u64,
+    bin: u64,
 ) -> HashMap<u64, u128> {
     if a.is_empty() {
         let mut m = HashMap::new();
@@ -351,15 +407,16 @@ fn full_sumset_near_target(
     }
     let k = block_size.max(1).min(a.len());
     let blocks: Vec<&[u64]> = a.chunks(k).collect();
-    let mut combined = block_sumset(blocks[0]);
+    let mut combined = bin_keys(block_sumset(blocks[0]), bin);
     for block in &blocks[1..] {
         let block_sums = if combined.len() >= max_entries {
             let mut coarse = HashMap::new();
             coarse.insert(0u64, 1u128);
             for &v in *block {
+                let v_bin = v / bin;
                 let mut next = coarse.clone();
                 for (&s, &c) in &coarse {
-                    *next.entry(s + v).or_insert(0) += c;
+                    *next.entry(s + v_bin).or_insert(0) += c;
                 }
                 coarse = next;
                 if coarse.len() >= max_entries {
@@ -368,7 +425,7 @@ fn full_sumset_near_target(
             }
             coarse
         } else {
-            block_sumset(block)
+            bin_keys(block_sumset(block), bin)
         };
         combined = convolve_capped_near_target(&combined, &block_sums, max_entries, target);
     }
@@ -418,6 +475,107 @@ mod tests {
             "lookup must remain a lower bound: default={}, exact={}",
             w_default,
             exact
+        );
+    }
+
+    #[test]
+    fn test_lookup_config_default_sat_per_bin_is_one() {
+        assert_eq!(LookupConfig::default().sat_per_bin, 1);
+    }
+
+    #[test]
+    fn test_with_sat_per_bin_sets_field_and_clamps_zero() {
+        assert_eq!(LookupConfig::default().with_sat_per_bin(8).sat_per_bin, 8);
+        assert_eq!(
+            LookupConfig::default().with_sat_per_bin(0).sat_per_bin,
+            1,
+            "bin=0 should clamp to 1"
+        );
+    }
+
+    #[test]
+    fn test_sat_per_bin_one_is_identity() {
+        let a: Vec<u64> = (1..=16).collect();
+        let e = a.iter().sum::<u64>() / 2;
+        let base = lookup_w(&a, e, 4).unwrap();
+        let binned =
+            lookup_w_with_config(&a, e, 4, &LookupConfig::default().with_sat_per_bin(1)).unwrap();
+        assert_eq!(base, binned, "sat_per_bin=1 must not alter output");
+    }
+
+    #[test]
+    fn test_sat_per_bin_lossless_on_bin_aligned_inputs() {
+        let a: Vec<u64> = (1..=12).map(|i| i * 8).collect();
+        let e = a.iter().sum::<u64>() / 2;
+        let exact = brute_force_w(&a, e) as u128;
+        let cfg = LookupConfig::default().with_sat_per_bin(8);
+        let binned = lookup_w_with_config(&a, e, 4, &cfg).unwrap();
+        assert_eq!(
+            binned, exact,
+            "bin-aligned inputs must yield exact W under binning"
+        );
+    }
+
+    #[test]
+    fn test_sat_per_bin_recovers_exact_under_tight_cap_when_aligned() {
+        // Large sat-scale values where the unbinned sumset would bail at a
+        // tight cap. With bin = common divisor, sums collide into ≤ 20 * 20 + 1
+        // quantized entries — well under the cap — so lookup recovers exact W.
+        let a: Vec<u64> = (1..=20).map(|i| i * 10_000).collect();
+        let e = a.iter().sum::<u64>() / 2;
+        let exact = brute_force_w(&a, e) as u128;
+
+        let binned = LookupConfig::from_max_entries(4096).with_sat_per_bin(10_000);
+        let w_binned = lookup_w_with_config(&a, e, 4, &binned).unwrap();
+        assert_eq!(
+            w_binned, exact,
+            "bin-aligned values with bin = coin size should recover exact W"
+        );
+    }
+
+    #[test]
+    fn test_sat_per_bin_output_histogram_unaligned() {
+        // a = [3, 5, 7] has exact sumset {0, 3, 5, 7, 8, 10, 12, 15}, all count 1.
+        // With bin = 5, the histogram groups sums into bins [k·5, (k+1)·5):
+        //   bucket 0 → {0, 3}      = 2 subsets
+        //   bucket 1 → {5, 7, 8}   = 3 subsets
+        //   bucket 2 → {10, 12}    = 2 subsets
+        //   bucket 3 → {15}        = 1 subset
+        // With block_size = N the full sumset is computed exactly before binning,
+        // so the bucket counts are exact even though inputs aren't bin-aligned.
+        let a: Vec<u64> = vec![3, 5, 7];
+        let cfg = LookupConfig::default().with_sat_per_bin(5);
+        let w0 = lookup_w_with_config(&a, 0, a.len(), &cfg).unwrap();
+        let w5 = lookup_w_with_config(&a, 5, a.len(), &cfg).unwrap();
+        let w10 = lookup_w_with_config(&a, 10, a.len(), &cfg).unwrap();
+        let w15 = lookup_w_with_config(&a, 15, a.len(), &cfg).unwrap();
+        assert_eq!(
+            (w0, w5, w10, w15),
+            (2, 3, 2, 1),
+            "block_size = N must yield exact bucket counts under output binning"
+        );
+
+        // Sanity: bucket counts sum to the full subset count 2^3 = 8.
+        assert_eq!(w0 + w5 + w10 + w15, 8);
+    }
+
+    #[test]
+    fn test_signed_sat_per_bin_matches_unscaled_when_aligned() {
+        let pos: Vec<u64> = vec![100, 200, 300];
+        let neg: Vec<u64> = vec![100, 200];
+        let target: i64 = 100;
+
+        let cfg = LookupConfig::default().with_sat_per_bin(100);
+        let lw_binned =
+            log_lookup_w_signed_target_aware_with_config(&pos, &neg, target, 3, &cfg).unwrap();
+
+        let lw_unscaled =
+            log_lookup_w_signed_target_aware(&[1, 2, 3], &[1, 2], 1, 3, 4_194_304).unwrap();
+        assert!(
+            (lw_binned - lw_unscaled).abs() < 1e-9,
+            "bin-aligned signed lookup must match the unscaled problem: binned={} unscaled={}",
+            lw_binned,
+            lw_unscaled
         );
     }
 
