@@ -23,7 +23,7 @@ Computing `W(E)` exactly is also exponential in the worst case, so the tool runs
 2. **Block-convolution lookup** for medium sets — a proven lower bound.
 3. **Asymptotic approximation** (Sasamoto / Toyoizumi / Nishimori) for large CoinJoins — fast, accurate at scale, but an approximation with error at finite N.
 
-The tool always reports the *more conservative* of the applicable tiers. Privacy is never overstated.
+Inspection commands (`compare`, `compare-empirical`, `full-report`) print every applicable tier side-by-side so disagreements between estimators stay visible. Scoring commands that must return a single number (`cost`, `density`) pick the tier by regime and fall back to `min(Sasamoto, lookup)` once `N` is large enough for the asymptotic regime, so the reported number is never more optimistic than the proven lookup lower bound.
 
 ## Install
 
@@ -31,7 +31,7 @@ The tool always reports the *more conservative* of the applicable tiers. Privacy
 cargo build --release
 export BIN=./target/release/dense-subset-sum
 
-# Optional, for the real Bitcoin UTXO distribution (~353 MB):
+# Required only for `compare-empirical` (real Bitcoin UTXO distribution, ~353 MB):
 bash scripts/fetch_cja_distribution.sh
 ```
 
@@ -76,7 +76,7 @@ $BIN suggest-split -i ... -o ... --change 7168 --max-pieces 6
 # Validate estimators against ground truth
 $BIN compare-synthetic --n 50 --l-max 500
 $BIN compare-wasabi2
-$BIN compare-empirical --n 50 --samples 2000000 --divisor 1000000
+$BIN compare-empirical --n 50 --samples 2000000 --divisor 1000000   # requires fetch_cja_distribution.sh
 $BIN compare-fixtures
 
 # Full test suite
@@ -221,7 +221,7 @@ N=27 > 25: switching to Monte Carlo (500000 samples, 60000 ms cap)
 No. `κ < κ_c` describes the E *band*; `W(E) = 0` describes one E *point*. A sparse midpoint in an otherwise dense band is normal for irregular inputs. Use `dense-boundary` to inspect the band.
 
 **Sasamoto returns `-inf` or a tiny number. Why?**
-The asymptotic approximation requires the target to land on the GCD lattice of the inputs; when it doesn't, `-inf` is reported by design. When N is too small or the distribution is irregular, Sasamoto can also underestimate — the scale switch takes `min(Sasamoto, lookup)`, so a broken Sasamoto only makes the result more conservative.
+The asymptotic approximation requires the target to land on the GCD lattice of the inputs; when it doesn't, `-inf` is reported by design. When N is too small or the distribution is irregular, Sasamoto can also underestimate. Inspection commands print Sasamoto and lookup side-by-side so this stays visible, and scoring commands fall back to `min(Sasamoto, lookup)` at large N so a broken Sasamoto only makes that single-number result stricter.
 
 **Sasamoto's error is 99% but Spearman is 1.0. How?**
 The approximation can have a systematic scale bias while still ranking E values correctly. Spearman captures the ranking (useful for comparing sub-transactions); absolute error captures the bias. The tool uses Sasamoto for the former, lookup/DP for the latter.
@@ -249,8 +249,8 @@ Any indexer output mapping to `Vec<u64>` of satoshis drops in. The scale switch 
 
 ## Design notes
 
-- **Proven vs approximated.** DP and lookup are proven lower bounds on W(E). Sasamoto is an asymptotic approximation with finite-N error. The tool tells you which tier it used and never reports an approximation as if it were a proof.
-- **Conservative combination.** When both Sasamoto and lookup apply, the tool takes the minimum — a broken approximation can only make the estimate stricter.
+- **Proven vs approximated.** DP and lookup are proven lower bounds on W(E). Sasamoto is an asymptotic approximation with finite-N error. The tool labels every value with the tier that produced it and never reports an approximation as if it were a proof.
+- **Inspection vs scoring.** Inspection commands print every tractable tier so disagreements are visible. Scoring commands return a single number and fall back to `min(Sasamoto, lookup)` once `N` is in the asymptotic regime, so a broken approximation can only make that number stricter.
 - **Fail-closed.** No sound positive lower bound ⇒ the regime is `Sparse` or `Unknown`, never a false `Dense`.
 - **Radix composite.** For equal-denomination CoinJoins, a dedicated detector adds a conservative lower bound from denomination structure.
 
