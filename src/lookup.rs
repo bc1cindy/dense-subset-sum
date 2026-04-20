@@ -4,6 +4,61 @@ use std::collections::HashMap;
 
 use crate::sasamoto::{gcd_slice, log_w_signed_sasamoto};
 
+/// Explicit method choice for signed probes. Pure routing — no combination logic.
+/// The caller picks based on deployment (WASM/mobile/server) and protocol stage
+/// (precomputation vs. critical section). Callers that want to compare both
+/// methods invoke the primitives (`log_w_signed_sasamoto`,
+/// `log_lookup_w_signed_target_aware`) directly and compose themselves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignedMethod {
+    /// Asymptotic estimate (O(N)). Fast; unreliable for small N or low density.
+    Sasamoto,
+    /// Target-aware lookup (O(2^N / blocks)). Sound lower bound; can hit the
+    /// `DEFAULT_MAX_ENTRIES` cap on large N with sat-scale values.
+    Lookup,
+}
+
+/// Routes a signed probe to one of the two primitives based on `method`. No
+/// auto-selection, no combination: see [`SignedMethod`]. Uses
+/// `LookupConfig::default()`; see [`log_w_signed_with_config`] for an explicit cap.
+pub fn log_w_signed(
+    positives: &[u64],
+    negatives: &[u64],
+    target: i64,
+    block_size: usize,
+    method: SignedMethod,
+) -> Option<f64> {
+    log_w_signed_with_config(
+        positives,
+        negatives,
+        target,
+        block_size,
+        &LookupConfig::default(),
+        method,
+    )
+}
+
+/// Like [`log_w_signed`], but with an explicit memory/entry cap for the lookup path.
+/// The cap is ignored when `method == SignedMethod::Sasamoto`.
+pub fn log_w_signed_with_config(
+    positives: &[u64],
+    negatives: &[u64],
+    target: i64,
+    block_size: usize,
+    cfg: &LookupConfig,
+    method: SignedMethod,
+) -> Option<f64> {
+    match method {
+        SignedMethod::Sasamoto => {
+            log_w_signed_sasamoto(positives, negatives, target).filter(|v| v.is_finite())
+        }
+        SignedMethod::Lookup => log_lookup_w_signed_target_aware_with_config(
+            positives, negatives, target, block_size, cfg,
+        )
+        .filter(|v| v.is_finite()),
+    }
+}
+
 /// 2^22 ≈ 4M entries fits in ~100MB; unbounded N≥20 with sat-scale values hits 10^9 entries (OOM).
 pub const DEFAULT_MAX_ENTRIES: usize = 4_194_304;
 
@@ -151,41 +206,6 @@ pub fn log_lookup_w_signed_target_aware_with_config(
     } else {
         Some((total as f64).ln())
     }
-}
-
-/// Sasamoto for N ≥ 40, target-aware lookup otherwise. Default signed entry point.
-pub fn log_w_signed_adaptive(
-    positives: &[u64],
-    negatives: &[u64],
-    target: i64,
-    block_size: usize,
-) -> Option<f64> {
-    log_w_signed_adaptive_with_config(
-        positives,
-        negatives,
-        target,
-        block_size,
-        &LookupConfig::default(),
-    )
-}
-
-/// Like `log_w_signed_adaptive`, but with an explicit memory/entry cap.
-pub fn log_w_signed_adaptive_with_config(
-    positives: &[u64],
-    negatives: &[u64],
-    target: i64,
-    block_size: usize,
-    cfg: &LookupConfig,
-) -> Option<f64> {
-    let n_total = positives.len() + negatives.len();
-    if n_total >= 40
-        && let Some(v) = log_w_signed_sasamoto(positives, negatives, target)
-        && v.is_finite()
-    {
-        return Some(v);
-    }
-    log_lookup_w_signed_target_aware_with_config(positives, negatives, target, block_size, cfg)
-        .filter(|v| v.is_finite())
 }
 
 /// Exact W(E) via DP: O(N · sum_max). `None` when sum_max exceeds `max_table_size`.
@@ -606,18 +626,5 @@ mod tests {
         let neg: Vec<u64> = vec![10, 20, 30];
         let lw = log_lookup_w_signed_target_aware(&pos, &neg, 0, 3, 4_194_304).unwrap();
         assert!(lw.is_finite(), "balanced multisets should have W >= 1");
-    }
-
-    #[test]
-    fn test_log_w_signed_adaptive_picks_best() {
-        let pos: Vec<u64> = vec![10, 20, 30];
-        let neg: Vec<u64> = vec![10, 20, 30];
-        let adaptive = log_w_signed_adaptive(&pos, &neg, 0, 3);
-        assert!(adaptive.is_some());
-        let pos_big: Vec<u64> = (1..=50).map(|i| i * 100).collect();
-        let neg_big: Vec<u64> = (1..=50).map(|i| i * 100).collect();
-        let adaptive_big = log_w_signed_adaptive(&pos_big, &neg_big, 0, 10);
-        assert!(adaptive_big.is_some());
-        assert!(adaptive_big.unwrap() > 0.0);
     }
 }

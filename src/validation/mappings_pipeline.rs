@@ -6,7 +6,7 @@
 use super::sub_tx_estimates::{SubTxEstimate, estimate_sub_txs};
 use crate::mappings;
 use crate::stats::{median, pearson_correlation, spearman_correlation};
-use crate::{Transaction, is_radix_like_in_base, log_w_signed_adaptive};
+use crate::{SignedMethod, Transaction, is_radix_like_in_base, log_w_signed};
 
 #[derive(Debug, Clone)]
 pub struct ValidationSummary {
@@ -108,16 +108,25 @@ pub fn compare_w_vs_mappings(
     lookup_k: usize,
     max_coins: usize,
 ) -> Option<MappingComparison> {
-    compare_w_vs_mappings_with(tx, label, lookup_k, max_coins, FeeHandling::PhantomOutput)
+    compare_w_vs_mappings_with(
+        tx,
+        label,
+        lookup_k,
+        max_coins,
+        FeeHandling::PhantomOutput,
+        SignedMethod::Lookup,
+    )
 }
 
 /// Returns `None` when total balanced coins exceed `max_coins` or the tx has a negative fee.
+/// `signed_method` is ignored unless `fee_handling == SignedMultiset`.
 pub fn compare_w_vs_mappings_with(
     tx: &Transaction,
     label: &str,
     lookup_k: usize,
     max_coins: usize,
     fee_handling: FeeHandling,
+    signed_method: SignedMethod,
 ) -> Option<MappingComparison> {
     let fee = tx.fee();
 
@@ -153,7 +162,7 @@ pub fn compare_w_vs_mappings_with(
         .fold(f64::NEG_INFINITY, f64::max);
 
     let log_w_signed = if matches!(fee_handling, FeeHandling::SignedMultiset) {
-        log_w_signed_adaptive(&tx.inputs, &tx.outputs, fee as i64, lookup_k)
+        log_w_signed(&tx.inputs, &tx.outputs, fee as i64, lookup_k, signed_method)
     } else {
         None
     };

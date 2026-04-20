@@ -6,9 +6,9 @@
 
 use crate::validation;
 use crate::{
-    SASAMOTO_MIN_N, Transaction, arbitrary_distinctness_log2, best_radix_base, coverage_bonus_log2,
-    denomination_reward_log2, density_regime, distinguish_coins, is_radix_like_any_base, kappa,
-    log_dp_w, log_lookup_w, log_w_for_e_sat,
+    SASAMOTO_MIN_N, SignedMethod, Transaction, arbitrary_distinctness_log2, best_radix_base,
+    coverage_bonus_log2, denomination_reward_log2, density_regime, distinguish_coins,
+    is_radix_like_any_base, kappa, log_dp_w, log_lookup_w, log_w_for_e_sat, log_w_signed,
 };
 
 #[derive(Debug, Clone)]
@@ -248,12 +248,14 @@ pub fn estimate_sub_tx(
 }
 
 /// Signed ±multiset probe: how many partitions of the other coins match
-/// `Σ(my_inputs) - Σ(my_outputs)`? Returns `log W_signed` in nats.
+/// `Σ(my_inputs) - Σ(my_outputs)`? Returns `log W_signed` in nats. The caller
+/// picks the estimation method — see [`SignedMethod`].
 pub fn estimate_sub_tx_signed(
     tx: &Transaction,
     my_input_indices: &[usize],
     my_output_indices: &[usize],
     lookup_k: usize,
+    method: SignedMethod,
 ) -> Option<f64> {
     let my_in_sum: u64 = my_input_indices.iter().map(|&i| tx.inputs[i]).sum();
     let my_out_sum: u64 = my_output_indices.iter().map(|&i| tx.outputs[i]).sum();
@@ -274,7 +276,7 @@ pub fn estimate_sub_tx_signed(
         .map(|(_, &v)| v)
         .collect();
 
-    crate::log_w_signed_adaptive(&other_outputs, &other_inputs, sub_balance, lookup_k)
+    log_w_signed(&other_outputs, &other_inputs, sub_balance, lookup_k, method)
 }
 
 /// Returns `(before, after, delta)` of mean signed log₂W per coin.
@@ -283,8 +285,9 @@ pub fn compare_augmented(
     new_inputs: &[u64],
     new_outputs: &[u64],
     config: &EstimatorConfig,
+    method: SignedMethod,
 ) -> (f64, f64, f64) {
-    let mean_before = tx_mean_signed(current_tx, config);
+    let mean_before = tx_mean_signed(current_tx, config, method);
 
     let mut aug_inputs = current_tx.inputs.clone();
     aug_inputs.extend_from_slice(new_inputs);
@@ -292,19 +295,19 @@ pub fn compare_augmented(
     aug_outputs.extend_from_slice(new_outputs);
     let aug_tx = Transaction::new(aug_inputs, aug_outputs);
 
-    let mean_after = tx_mean_signed(&aug_tx, config);
+    let mean_after = tx_mean_signed(&aug_tx, config, method);
     let delta = mean_after - mean_before;
 
     (mean_before, mean_after, delta)
 }
 
 /// Mean log₂ W_signed over all coins. 0 for degenerate txs.
-fn tx_mean_signed(tx: &Transaction, config: &EstimatorConfig) -> f64 {
+fn tx_mean_signed(tx: &Transaction, config: &EstimatorConfig, method: SignedMethod) -> f64 {
     let total_coins = tx.inputs.len() + tx.outputs.len();
     if total_coins < 2 {
         return 0.0;
     }
-    let measurements = validation::per_coin_measurements_fee_aware(tx, config.lookup_k);
+    let measurements = validation::per_coin_measurements_fee_aware(tx, config.lookup_k, method);
     let ln2 = std::f64::consts::LN_2;
     let reachable: Vec<f64> = measurements
         .iter()
@@ -440,7 +443,13 @@ mod tests {
     fn test_compare_augmented_positive() {
         let base_tx = Transaction::new(vec![100, 200, 300], vec![150, 250, 200]);
         let config = EstimatorConfig::default();
-        let (before, after, _) = compare_augmented(&base_tx, &[400, 500], &[450, 450], &config);
+        let (before, after, _) = compare_augmented(
+            &base_tx,
+            &[400, 500],
+            &[450, 450],
+            &config,
+            SignedMethod::Lookup,
+        );
         assert!(after >= before);
     }
 
@@ -482,11 +491,11 @@ mod tests {
         ];
 
         let mut tx = Transaction::new(participants[0].0.clone(), participants[0].1.clone());
-        let mut means = vec![tx_mean_signed(&tx, &config)];
+        let mut means = vec![tx_mean_signed(&tx, &config, SignedMethod::Lookup)];
         for (inputs, outputs) in &participants[1..] {
             tx.inputs.extend(inputs);
             tx.outputs.extend(outputs);
-            means.push(tx_mean_signed(&tx, &config));
+            means.push(tx_mean_signed(&tx, &config, SignedMethod::Lookup));
         }
 
         assert!(*means.last().unwrap() >= means[0]);
@@ -504,7 +513,7 @@ mod tests {
     #[test]
     fn test_estimate_sub_tx_signed_balanced() {
         let tx = Transaction::new(vec![100, 200, 300, 400], vec![150, 150, 300, 400]);
-        let log_w = estimate_sub_tx_signed(&tx, &[0, 1], &[0, 1], 3);
+        let log_w = estimate_sub_tx_signed(&tx, &[0, 1], &[0, 1], 3, SignedMethod::Lookup);
         assert!(log_w.is_some());
         assert!(log_w.unwrap() >= 0.0);
     }
@@ -512,7 +521,7 @@ mod tests {
     #[test]
     fn test_estimate_sub_tx_signed_single_coin() {
         let tx = Transaction::new(vec![10, 20, 30], vec![10, 20, 30]);
-        assert!(estimate_sub_tx_signed(&tx, &[0], &[0], 3).is_some());
+        assert!(estimate_sub_tx_signed(&tx, &[0], &[0], 3, SignedMethod::Lookup).is_some());
     }
 
     #[test]

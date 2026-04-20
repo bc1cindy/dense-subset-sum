@@ -3,7 +3,7 @@
 //! Separate from `estimator` because change decomposition is a *search* over candidate
 //! output-side splits ranked by mean signed log₂W.
 
-use crate::{Transaction, validation};
+use crate::{SignedMethod, Transaction, validation};
 
 /// Maurer §5 output splitting. Returns `(best_split, best_mean_log2_w_signed)`.
 ///
@@ -14,6 +14,7 @@ pub fn suggest_output_split(
     change_amount: u64,
     max_pieces: usize,
     lookup_k: usize,
+    method: SignedMethod,
 ) -> (Vec<u64>, f64) {
     if change_amount == 0 {
         return (vec![], f64::NEG_INFINITY);
@@ -84,7 +85,7 @@ pub fn suggest_output_split(
         let mut test_outputs = tx.outputs.clone();
         test_outputs.extend_from_slice(candidate);
         let test_tx = Transaction::new(tx.inputs.clone(), test_outputs);
-        let measurements = validation::per_coin_measurements(&test_tx, lookup_k);
+        let measurements = validation::per_coin_measurements(&test_tx, lookup_k, method);
         let ln2 = std::f64::consts::LN_2;
         let reachable: Vec<f64> = measurements
             .iter()
@@ -113,7 +114,7 @@ mod tests {
     fn test_suggest_output_split_preserves_total() {
         let tx = Transaction::new(vec![100, 200, 300], vec![100, 200, 250]);
         let change = 50u64;
-        let (split, mean) = suggest_output_split(&tx, change, 4, 3);
+        let (split, mean) = suggest_output_split(&tx, change, 4, 3, SignedMethod::Lookup);
         assert_eq!(split.iter().sum::<u64>(), change);
         assert!(mean.is_finite() || split.len() == 1);
     }
@@ -121,21 +122,22 @@ mod tests {
     #[test]
     fn test_suggest_output_split_zero_change() {
         let tx = Transaction::new(vec![100], vec![100]);
-        let (split, _) = suggest_output_split(&tx, 0, 4, 3);
+        let (split, _) = suggest_output_split(&tx, 0, 4, 3, SignedMethod::Lookup);
         assert!(split.is_empty());
     }
 
     #[test]
     fn test_suggest_output_split_picks_best() {
         let tx = Transaction::new(vec![100, 100, 100, 100], vec![100, 100, 100, 50]);
-        let (split, best_mean) = suggest_output_split(&tx, 50, 4, 3);
+        let (split, best_mean) = suggest_output_split(&tx, 50, 4, 3, SignedMethod::Lookup);
         assert_eq!(split.iter().sum::<u64>(), 50);
         let single_tx = Transaction::new(tx.inputs.clone(), {
             let mut o = tx.outputs.clone();
             o.push(50);
             o
         });
-        let single_measurements = validation::per_coin_measurements(&single_tx, 3);
+        let single_measurements =
+            validation::per_coin_measurements(&single_tx, 3, SignedMethod::Lookup);
         let ln2 = std::f64::consts::LN_2;
         let r: Vec<f64> = single_measurements
             .iter()

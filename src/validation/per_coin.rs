@@ -1,10 +1,7 @@
 //! Per-coin "unconstrained-ness": W(E=coin_value, A=other coins) via signed probe.
 
 use super::exclude_values;
-use crate::{
-    DEFAULT_MAX_ENTRIES, Transaction, kappa_c, log_lookup_w_signed_target_aware,
-    log_w_signed_sasamoto,
-};
+use crate::{SignedMethod, Transaction, kappa_c, log_w_signed};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoinRole {
@@ -35,35 +32,27 @@ pub struct CoinMeasurement {
 }
 
 /// Zero-fee signed probe: count signed partitions of the other coins balancing `value`.
-pub fn per_coin_measurements(tx: &Transaction, lookup_k: usize) -> Vec<CoinMeasurement> {
-    per_coin_measurements_inner(tx, lookup_k, false)
+pub fn per_coin_measurements(
+    tx: &Transaction,
+    lookup_k: usize,
+    method: SignedMethod,
+) -> Vec<CoinMeasurement> {
+    per_coin_measurements_inner(tx, lookup_k, method, false)
 }
 
 /// Input target = v − round(F · v / Σin); outputs unchanged (they don't pay fees).
-pub fn per_coin_measurements_fee_aware(tx: &Transaction, lookup_k: usize) -> Vec<CoinMeasurement> {
-    per_coin_measurements_inner(tx, lookup_k, true)
-}
-
-/// Above this `positives.len() + negatives.len()`, use Sasamoto (O(N)): the lookup hits
-/// the sumset cap and degrades. Twice `crate::SASAMOTO_MIN_N` because this indexes the
-/// total ±multiset size, not one side.
-const SIGNED_SASAMOTO_THRESHOLD: usize = 40;
-
-fn signed_probe(positives: &[u64], negatives: &[u64], target: i64, lookup_k: usize) -> Option<f64> {
-    let n_other = positives.len() + negatives.len();
-    if n_other >= SIGNED_SASAMOTO_THRESHOLD
-        && let Some(v) = log_w_signed_sasamoto(positives, negatives, target)
-        && v.is_finite()
-    {
-        return Some(v);
-    }
-    log_lookup_w_signed_target_aware(positives, negatives, target, lookup_k, DEFAULT_MAX_ENTRIES)
-        .filter(|v| v.is_finite())
+pub fn per_coin_measurements_fee_aware(
+    tx: &Transaction,
+    lookup_k: usize,
+    method: SignedMethod,
+) -> Vec<CoinMeasurement> {
+    per_coin_measurements_inner(tx, lookup_k, method, true)
 }
 
 fn per_coin_measurements_inner(
     tx: &Transaction,
     lookup_k: usize,
+    method: SignedMethod,
     fee_aware: bool,
 ) -> Vec<CoinMeasurement> {
     let total = tx.inputs.len() + tx.outputs.len();
@@ -92,7 +81,7 @@ fn per_coin_measurements_inner(
             value as i64
         };
 
-        let log_w_signed = signed_probe(&other_outputs, &other_inputs, target, lookup_k);
+        let log_w_signed = log_w_signed(&other_outputs, &other_inputs, target, lookup_k, method);
         measurements.push(CoinMeasurement {
             role: CoinRole::Input,
             index: i,
@@ -107,7 +96,7 @@ fn per_coin_measurements_inner(
         let other_inputs = tx.inputs.clone();
         let other_outputs = exclude_values(&tx.outputs, &[value]);
         let target = value as i64;
-        let log_w_signed = signed_probe(&other_inputs, &other_outputs, target, lookup_k);
+        let log_w_signed = log_w_signed(&other_inputs, &other_outputs, target, lookup_k, method);
         measurements.push(CoinMeasurement {
             role: CoinRole::Output,
             index: i,
@@ -192,7 +181,7 @@ mod tests {
     #[test]
     fn test_per_coin_measurements_cardinality() {
         let tx = fixtures::maurer_fig2();
-        let measurements = per_coin_measurements(&tx, 4);
+        let measurements = per_coin_measurements(&tx, 4, SignedMethod::Lookup);
         assert_eq!(measurements.len(), tx.inputs.len() + tx.outputs.len());
 
         let n_in = measurements
@@ -223,7 +212,7 @@ mod tests {
             .iter()
             .find(|(l, _)| *l == "w2_6a6dcc22_17in6out")
             .unwrap();
-        let measurements = per_coin_measurements(tx, 8);
+        let measurements = per_coin_measurements(tx, 8, SignedMethod::Lookup);
 
         assert_eq!(measurements.len(), 23);
 
@@ -243,8 +232,8 @@ mod tests {
         let tx1 = Transaction::new(vec![1, 2, 3], vec![6]);
         let tx2 = Transaction::new(vec![6], vec![1, 2, 3]);
 
-        let s1 = per_coin_measurements(&tx1, 3);
-        let s2 = per_coin_measurements(&tx2, 3);
+        let s1 = per_coin_measurements(&tx1, 3, SignedMethod::Lookup);
+        let s2 = per_coin_measurements(&tx2, 3, SignedMethod::Lookup);
         assert_eq!(s1.len(), s2.len(), "coin counts differ");
 
         let mut m1: Vec<(u64, Option<f64>)> =
@@ -274,7 +263,7 @@ mod tests {
     #[test]
     fn test_per_coin_measurements_balanced_tx_has_nonneg_log() {
         let tx = Transaction::new(vec![5, 7, 11], vec![5, 7, 11]);
-        let measurements = per_coin_measurements(&tx, 3);
+        let measurements = per_coin_measurements(&tx, 3, SignedMethod::Lookup);
         for c in &measurements {
             let lw = c
                 .log_w_signed
@@ -291,8 +280,8 @@ mod tests {
     #[test]
     fn test_per_coin_measurements_fee_aware_adjusts_target() {
         let tx = Transaction::new(vec![100, 200, 300], vec![90, 190, 290]);
-        let normal = per_coin_measurements(&tx, 3);
-        let fee_aware = per_coin_measurements_fee_aware(&tx, 3);
+        let normal = per_coin_measurements(&tx, 3, SignedMethod::Lookup);
+        let fee_aware = per_coin_measurements_fee_aware(&tx, 3, SignedMethod::Lookup);
         assert_eq!(normal.len(), fee_aware.len());
         for (n, f) in normal.iter().zip(fee_aware.iter()) {
             assert_eq!(n.role, f.role);
@@ -317,7 +306,7 @@ mod tests {
         // N_in=3, L_in=max=3 → x_i = v_i / (N·L) = v_i / 9.
         // Expected: kappa_c(v/9) matches a direct call for every coin (in and out).
         let tx = Transaction::new(vec![1, 2, 3], vec![6]);
-        let measurements = per_coin_measurements(&tx, 3);
+        let measurements = per_coin_measurements(&tx, 3, SignedMethod::Lookup);
         let n = tx.inputs.len() as f64;
         let l = *tx.inputs.iter().max().unwrap() as f64;
         for m in &measurements {
@@ -339,8 +328,8 @@ mod tests {
     #[test]
     fn test_per_coin_measurements_fee_aware_zero_fee_matches() {
         let tx = Transaction::new(vec![10, 20, 30], vec![10, 20, 30]);
-        let normal = per_coin_measurements(&tx, 3);
-        let fee_aware = per_coin_measurements_fee_aware(&tx, 3);
+        let normal = per_coin_measurements(&tx, 3, SignedMethod::Lookup);
+        let fee_aware = per_coin_measurements_fee_aware(&tx, 3, SignedMethod::Lookup);
         for (n, f) in normal.iter().zip(fee_aware.iter()) {
             assert_eq!(n.log_w_signed, f.log_w_signed);
         }
@@ -364,7 +353,8 @@ mod tests {
         outputs.push(out_total.saturating_sub(partial));
         let tx = Transaction::new(inputs, outputs);
 
-        let measurements = per_coin_measurements(&tx, 10);
+        // N=160 is past the lookup cap; exercise the Sasamoto path explicitly.
+        let measurements = per_coin_measurements(&tx, 10, SignedMethod::Sasamoto);
         assert_eq!(
             measurements.len(),
             160,
@@ -401,7 +391,8 @@ mod tests {
     #[test]
     fn test_per_coin_measurements_n50_equal_denoms() {
         let tx = Transaction::new(vec![100_000; 25], vec![100_000; 25]);
-        let measurements = per_coin_measurements(&tx, 10);
+        // Exercise the Sasamoto path at N=50 where lookup hits the sumset cap.
+        let measurements = per_coin_measurements(&tx, 10, SignedMethod::Sasamoto);
         assert_eq!(measurements.len(), 50);
         let reachable = measurements
             .iter()

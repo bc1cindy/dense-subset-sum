@@ -19,9 +19,9 @@ pub mod validation;
 
 pub use dense_region::find_dense_region;
 pub use lookup::{
-    DEFAULT_MAX_ENTRIES, LookupConfig, brute_force_w, dp_w, log_dp_w, log_lookup_w,
+    DEFAULT_MAX_ENTRIES, LookupConfig, SignedMethod, brute_force_w, dp_w, log_dp_w, log_lookup_w,
     log_lookup_w_signed_target_aware, log_lookup_w_signed_target_aware_with_config,
-    log_lookup_w_with_config, log_w_signed_adaptive, log_w_signed_adaptive_with_config, lookup_w,
+    log_lookup_w_with_config, log_w_signed, log_w_signed_with_config, lookup_w,
     lookup_w_with_config,
 };
 pub use radix::{
@@ -37,9 +37,4 @@ pub(crate) use sasamoto::gcd_slice;
 
 /// One-sided Sasamoto threshold: below this |A|, the saddle approximation is
 /// unreliable and the lookup/DP path is authoritative.
-///
-/// The signed (two-sided) probe uses a larger threshold (see
-/// `SIGNED_SASAMOTO_THRESHOLD` in `validation::per_coin`) because its reliability
-/// is indexed by `positives.len() + negatives.len()` (the whole ±multiset), not
-/// by a single side's cardinality.
 pub const SASAMOTO_MIN_N: usize = 20;

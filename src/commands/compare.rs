@@ -2,7 +2,7 @@
 
 use dense_subset_sum::{comparison, fixtures, validation};
 
-use super::parse_values;
+use super::{parse_signed_method, parse_values};
 
 pub(crate) fn cmd_compare(values_str: &str, min_w: u64, block_size: usize, csv: bool) {
     let a = parse_values(values_str);
@@ -73,7 +73,12 @@ pub(crate) fn cmd_compare_random(
     }
 }
 
-pub(crate) fn cmd_compare_wasabi2(max_coins: usize, block_size: usize, fee_handling_str: &str) {
+pub(crate) fn cmd_compare_wasabi2(
+    max_coins: usize,
+    block_size: usize,
+    fee_handling_str: &str,
+    signed_method_str: &str,
+) {
     let fee_handling = match fee_handling_str {
         "phantom" => validation::FeeHandling::PhantomOutput,
         "signed" => validation::FeeHandling::SignedMultiset,
@@ -85,15 +90,25 @@ pub(crate) fn cmd_compare_wasabi2(max_coins: usize, block_size: usize, fee_handl
             std::process::exit(1);
         }
     };
+    let signed_method = parse_signed_method(signed_method_str);
 
     let txs = fixtures::all_wasabi2_false_cjtxs();
     let mut comparisons = Vec::new();
     let mut skipped = 0;
 
-    println!("fee-handling: {}", fee_handling_str);
+    println!(
+        "fee-handling: {}  signed-method: {}",
+        fee_handling_str, signed_method_str
+    );
     for (label, tx) in &txs {
-        match validation::compare_w_vs_mappings_with(tx, label, block_size, max_coins, fee_handling)
-        {
+        match validation::compare_w_vs_mappings_with(
+            tx,
+            label,
+            block_size,
+            max_coins,
+            fee_handling,
+            signed_method,
+        ) {
             Some(mc) => {
                 validation::print_mapping_comparison(&mc);
                 comparisons.push(mc);

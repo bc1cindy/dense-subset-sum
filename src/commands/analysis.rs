@@ -6,19 +6,19 @@ use dense_subset_sum::{
 };
 
 use super::{
-    Transaction, fmt_log_w, parse_tx, parse_values, per_coin_summary, resolve_tx, spearman_opt,
+    Transaction, TxSpec, fmt_log_w, parse_signed_method, parse_tx, parse_values, per_coin_summary,
+    resolve_tx, spearman_opt,
 };
 
 pub(crate) fn cmd_compare_augmented(
-    tx_label: Option<&str>,
-    tx_json: Option<&std::path::Path>,
-    inputs_str: &str,
-    outputs_str: &str,
+    tx_spec: &TxSpec<'_>,
     new_inputs_str: &str,
     new_outputs_str: &str,
     block_size: usize,
+    signed_method_str: &str,
 ) {
-    let (label, tx) = resolve_tx(tx_label, tx_json, inputs_str, outputs_str);
+    let (label, tx) = resolve_tx(tx_spec);
+    let signed_method = parse_signed_method(signed_method_str);
     let new_inputs = if new_inputs_str.is_empty() {
         Vec::new()
     } else {
@@ -40,7 +40,7 @@ pub(crate) fn cmd_compare_augmented(
         ..Default::default()
     };
     let (before, after, delta) =
-        estimator::compare_augmented(&tx, &new_inputs, &new_outputs, &config);
+        estimator::compare_augmented(&tx, &new_inputs, &new_outputs, &config, signed_method);
 
     println!(
         "Base tx: {} ({} in / {} out)",
@@ -178,27 +178,17 @@ pub(crate) fn cmd_measure(inputs_str: &str, outputs_str: &str, block_size: usize
     println!("\nMidpoint estimate: {:.4}", avg);
 }
 
-pub(crate) fn cmd_coin_measures(
-    tx_label: Option<&str>,
-    tx_json: Option<&std::path::Path>,
-    inputs_str: &str,
-    outputs_str: &str,
-    block_size: usize,
-) {
-    let (label, tx) = resolve_tx(tx_label, tx_json, inputs_str, outputs_str);
+pub(crate) fn cmd_coin_measures(tx_spec: &TxSpec<'_>, block_size: usize, signed_method_str: &str) {
+    let (label, tx) = resolve_tx(tx_spec);
+    let signed_method = parse_signed_method(signed_method_str);
 
-    let measurements = validation::per_coin_measurements(&tx, block_size);
+    let measurements = validation::per_coin_measurements(&tx, block_size, signed_method);
     validation::print_per_coin_measurements(&label, &tx, &measurements);
 }
 
-pub(crate) fn cmd_full_report(
-    tx_label: Option<&str>,
-    tx_json: Option<&std::path::Path>,
-    inputs_str: &str,
-    outputs_str: &str,
-    block_size: usize,
-) {
-    let (label, tx) = resolve_tx(tx_label, tx_json, inputs_str, outputs_str);
+pub(crate) fn cmd_full_report(tx_spec: &TxSpec<'_>, block_size: usize, signed_method_str: &str) {
+    let (label, tx) = resolve_tx(tx_spec);
+    let signed_method = parse_signed_method(signed_method_str);
     let cfg = estimator::EstimatorConfig {
         lookup_k: block_size,
         ..Default::default()
@@ -252,7 +242,7 @@ pub(crate) fn cmd_full_report(
     );
 
     println!("\n── Per-coin ambiguity ──");
-    let coins_sg = validation::per_coin_measurements(&tx, block_size);
+    let coins_sg = validation::per_coin_measurements(&tx, block_size, signed_method);
     per_coin_summary("Signed", &coins_sg, ln2);
 
     println!("\n── CJA mappings vs W (Maurer/Boltzmann) ──");
@@ -260,7 +250,8 @@ pub(crate) fn cmd_full_report(
         ("phantom", validation::FeeHandling::PhantomOutput),
         ("signed ", validation::FeeHandling::SignedMultiset),
     ] {
-        match validation::compare_w_vs_mappings_with(&tx, &label, block_size, 26, fh) {
+        match validation::compare_w_vs_mappings_with(&tx, &label, block_size, 26, fh, signed_method)
+        {
             Some(mc) => {
                 let sig = mc
                     .log_w_signed
@@ -298,7 +289,12 @@ pub(crate) fn cmd_full_report(
     }
 }
 
-pub(crate) fn cmd_correlate_estimators(max_coins: usize, block_size: usize) {
+pub(crate) fn cmd_correlate_estimators(
+    max_coins: usize,
+    block_size: usize,
+    signed_method_str: &str,
+) {
+    let signed_method = parse_signed_method(signed_method_str);
     let ln2 = 2f64.ln();
     let all: Vec<(&'static str, Transaction)> = fixtures::all_wasabi2_positive_cjtxs()
         .into_iter()
@@ -320,6 +316,7 @@ pub(crate) fn cmd_correlate_estimators(max_coins: usize, block_size: usize) {
             block_size,
             max_coins,
             validation::FeeHandling::SignedMultiset,
+            signed_method,
         ) {
             Some(m) => m,
             None => continue,
@@ -333,7 +330,7 @@ pub(crate) fn cmd_correlate_estimators(max_coins: usize, block_size: usize) {
             Some(v) if v.is_finite() => v / ln2,
             _ => continue,
         };
-        let coins = validation::per_coin_measurements(&tx, block_size);
+        let coins = validation::per_coin_measurements(&tx, block_size, signed_method);
         let vals: Vec<f64> = coins.iter().filter_map(|c| c.log_w_signed).collect();
         if vals.is_empty() {
             continue;
@@ -373,17 +370,19 @@ pub(crate) fn cmd_suggest_split(
     change: u64,
     max_pieces: usize,
     block_size: usize,
+    signed_method_str: &str,
 ) {
     if change == 0 {
         eprintln!("error: change must be > 0");
         std::process::exit(1);
     }
+    let signed_method = parse_signed_method(signed_method_str);
     let inputs = parse_values(inputs_str);
     let outputs = parse_values(outputs_str);
     let tx = Transaction::new(inputs.clone(), outputs.clone());
 
     let (best_split, best_mean) =
-        change_split::suggest_output_split(&tx, change, max_pieces, block_size);
+        change_split::suggest_output_split(&tx, change, max_pieces, block_size, signed_method);
 
     println!(
         "Tx: inputs={:?}, outputs (excl. change)={:?}",

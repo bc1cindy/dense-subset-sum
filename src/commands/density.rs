@@ -4,7 +4,7 @@ use dense_subset_sum::{
     density_regime, estimator, find_dense_region, kappa, kappa_c, log_w_for_e, validation,
 };
 
-use super::{parse_values, parse_values_f64, resolve_tx, resolve_values};
+use super::{TxSpec, parse_values, parse_values_f64, resolve_tx, resolve_values};
 
 pub(crate) fn cmd_density(
     tx_label: Option<&str>,
@@ -125,15 +125,8 @@ pub(crate) fn cmd_kappa(values_str: &str, target: Option<u64>) {
     }
 }
 
-pub(crate) fn cmd_dense_boundary(
-    tx_label: Option<&str>,
-    tx_json: Option<&std::path::Path>,
-    inputs_str: &str,
-    outputs_str: &str,
-    samples: usize,
-    seed: u64,
-) {
-    let (label, tx) = resolve_tx(tx_label, tx_json, inputs_str, outputs_str);
+pub(crate) fn cmd_dense_boundary(tx_spec: &TxSpec<'_>, samples: usize, seed: u64) {
+    let (label, tx) = resolve_tx(tx_spec);
     let a = &tx.inputs;
     let n = a.len();
     let sum: u64 = a.iter().sum();

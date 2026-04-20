@@ -3,10 +3,10 @@
 use clap::{Parser, Subcommand};
 
 use crate::commands::{
-    cmd_analyze_tx, cmd_coin_measures, cmd_compare, cmd_compare_augmented, cmd_compare_fixtures,
-    cmd_compare_random, cmd_compare_synthetic, cmd_compare_wasabi2, cmd_correlate_estimators,
-    cmd_dense_boundary, cmd_density, cmd_density_scan, cmd_estimate, cmd_full_report, cmd_kappa,
-    cmd_measure, cmd_subset_density, cmd_suggest_split, cmd_validate,
+    TxSpec, cmd_analyze_tx, cmd_coin_measures, cmd_compare, cmd_compare_augmented,
+    cmd_compare_fixtures, cmd_compare_random, cmd_compare_synthetic, cmd_compare_wasabi2,
+    cmd_correlate_estimators, cmd_dense_boundary, cmd_density, cmd_density_scan, cmd_estimate,
+    cmd_full_report, cmd_kappa, cmd_measure, cmd_subset_density, cmd_suggest_split, cmd_validate,
 };
 
 #[derive(Parser)]
@@ -144,6 +144,10 @@ enum Command {
         /// "phantom" (Maurer canonical fee-as-output) or "signed" (signed W on fee).
         #[arg(long, default_value = "phantom")]
         fee_handling: String,
+        /// Signed probe estimator: "sasamoto" or "lookup". Required when
+        /// --fee-handling=signed. No default policy — caller picks based on deployment.
+        #[arg(long)]
+        signed_method: String,
     },
     /// Per-coin W estimates (signed ±multiset probe) for every input and output.
     CoinMeasures {
@@ -162,6 +166,10 @@ enum Command {
         /// Block size for lookup table
         #[arg(short = 'k', long, default_value = "10")]
         block_size: usize,
+        /// Signed probe estimator: "sasamoto" or "lookup". Required — no library-level
+        /// default policy; caller picks based on deployment (WASM/mobile/server).
+        #[arg(long)]
+        signed_method: String,
     },
     /// Random-subset density sweep: fraction of subsets with κ < κ_c per size.
     SubsetDensity {
@@ -193,6 +201,9 @@ enum Command {
         max_coins: usize,
         #[arg(short = 'k', long, default_value = "10")]
         block_size: usize,
+        /// Signed probe estimator: "sasamoto" or "lookup".
+        #[arg(long)]
+        signed_method: String,
     },
     /// Dense target range [E_lo, E_hi], fraction of [0,Σa] dense, and k* crossover.
     DenseBoundary {
@@ -227,6 +238,10 @@ enum Command {
         /// Block size for lookup table.
         #[arg(short = 'k', long, default_value = "10")]
         block_size: usize,
+        /// Signed probe estimator: "sasamoto" or "lookup". Only applied
+        /// to the SignedMultiset fee-handling row.
+        #[arg(long)]
+        signed_method: String,
     },
     /// Unified density API: 3-tier scale switch (exact DP → lookup → Sasamoto).
     Density {
@@ -290,6 +305,9 @@ enum Command {
         /// Block size for lookup table in the signed probe.
         #[arg(short = 'k', long, default_value = "10")]
         block_size: usize,
+        /// Signed probe estimator: "sasamoto" or "lookup". Required.
+        #[arg(long)]
+        signed_method: String,
     },
     /// Rank low-Hamming-weight change decompositions by mean signed log₂W.
     SuggestSplit {
@@ -308,6 +326,9 @@ enum Command {
         /// Block size for lookup table in the signed probe.
         #[arg(short = 'k', long, default_value = "3")]
         block_size: usize,
+        /// Signed probe estimator: "sasamoto" or "lookup". Required.
+        #[arg(long)]
+        signed_method: String,
     },
 }
 
@@ -354,19 +375,24 @@ pub fn run(cli: Cli) {
             max_coins,
             block_size,
             fee_handling,
-        } => cmd_compare_wasabi2(max_coins, block_size, &fee_handling),
+            signed_method,
+        } => cmd_compare_wasabi2(max_coins, block_size, &fee_handling, &signed_method),
         Command::CoinMeasures {
             tx_label,
             tx_json,
             inputs,
             outputs,
             block_size,
+            signed_method,
         } => cmd_coin_measures(
-            tx_label.as_deref(),
-            tx_json.as_deref(),
-            &inputs,
-            &outputs,
+            &TxSpec {
+                label: tx_label.as_deref(),
+                json: tx_json.as_deref(),
+                inputs_str: &inputs,
+                outputs_str: &outputs,
+            },
             block_size,
+            &signed_method,
         ),
         Command::SubsetDensity {
             tx_label,
@@ -401,14 +427,18 @@ pub fn run(cli: Cli) {
             new_inputs,
             new_outputs,
             block_size,
+            signed_method,
         } => cmd_compare_augmented(
-            tx_label.as_deref(),
-            tx_json.as_deref(),
-            &inputs,
-            &outputs,
+            &TxSpec {
+                label: tx_label.as_deref(),
+                json: tx_json.as_deref(),
+                inputs_str: &inputs,
+                outputs_str: &outputs,
+            },
             &new_inputs,
             &new_outputs,
             block_size,
+            &signed_method,
         ),
         Command::SuggestSplit {
             inputs,
@@ -416,11 +446,20 @@ pub fn run(cli: Cli) {
             change,
             max_pieces,
             block_size,
-        } => cmd_suggest_split(&inputs, &outputs, change, max_pieces, block_size),
+            signed_method,
+        } => cmd_suggest_split(
+            &inputs,
+            &outputs,
+            change,
+            max_pieces,
+            block_size,
+            &signed_method,
+        ),
         Command::CorrelateEstimators {
             max_coins,
             block_size,
-        } => cmd_correlate_estimators(max_coins, block_size),
+            signed_method,
+        } => cmd_correlate_estimators(max_coins, block_size, &signed_method),
         Command::DenseBoundary {
             tx_label,
             tx_json,
@@ -429,10 +468,12 @@ pub fn run(cli: Cli) {
             samples,
             seed,
         } => cmd_dense_boundary(
-            tx_label.as_deref(),
-            tx_json.as_deref(),
-            &inputs,
-            &outputs,
+            &TxSpec {
+                label: tx_label.as_deref(),
+                json: tx_json.as_deref(),
+                inputs_str: &inputs,
+                outputs_str: &outputs,
+            },
             samples,
             seed,
         ),
@@ -442,12 +483,16 @@ pub fn run(cli: Cli) {
             inputs,
             outputs,
             block_size,
+            signed_method,
         } => cmd_full_report(
-            tx_label.as_deref(),
-            tx_json.as_deref(),
-            &inputs,
-            &outputs,
+            &TxSpec {
+                label: tx_label.as_deref(),
+                json: tx_json.as_deref(),
+                inputs_str: &inputs,
+                outputs_str: &outputs,
+            },
             block_size,
+            &signed_method,
         ),
         Command::Density {
             tx_label,

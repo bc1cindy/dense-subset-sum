@@ -24,7 +24,21 @@ pub(crate) use density::{
     cmd_dense_boundary, cmd_density, cmd_density_scan, cmd_kappa, cmd_subset_density,
 };
 
-use dense_subset_sum::{Transaction, fixtures, stats, validation};
+use dense_subset_sum::{SignedMethod, Transaction, fixtures, stats, validation};
+
+pub(super) fn parse_signed_method(s: &str) -> SignedMethod {
+    match s {
+        "sasamoto" => SignedMethod::Sasamoto,
+        "lookup" => SignedMethod::Lookup,
+        other => {
+            eprintln!(
+                "invalid --signed-method value: {:?} (expected \"sasamoto\" or \"lookup\")",
+                other
+            );
+            std::process::exit(1);
+        }
+    }
+}
 
 pub(super) fn parse_tx(inputs_str: &str, outputs_str: &str) -> Transaction {
     Transaction::new(parse_values(inputs_str), parse_values(outputs_str))
@@ -75,16 +89,18 @@ fn load_tx_json(path: &std::path::Path) -> (String, Transaction) {
     (label, Transaction::new(parsed.inputs, parsed.outputs))
 }
 
-pub(super) fn resolve_tx(
-    tx_label: Option<&str>,
-    tx_json: Option<&std::path::Path>,
-    inputs_str: &str,
-    outputs_str: &str,
-) -> (String, Transaction) {
-    if let Some(path) = tx_json {
+pub(crate) struct TxSpec<'a> {
+    pub label: Option<&'a str>,
+    pub json: Option<&'a std::path::Path>,
+    pub inputs_str: &'a str,
+    pub outputs_str: &'a str,
+}
+
+pub(super) fn resolve_tx(spec: &TxSpec<'_>) -> (String, Transaction) {
+    if let Some(path) = spec.json {
         return load_tx_json(path);
     }
-    match tx_label {
+    match spec.label {
         Some(lbl) => {
             let all: Vec<(&'static str, Transaction)> = fixtures::all_wasabi2_false_cjtxs()
                 .into_iter()
@@ -107,13 +123,16 @@ pub(super) fn resolve_tx(
             }
         }
         None => {
-            if inputs_str.is_empty() || outputs_str.is_empty() {
+            if spec.inputs_str.is_empty() || spec.outputs_str.is_empty() {
                 eprintln!(
                     "must provide one of: --tx-json <path>, --tx-label <label>, or both --inputs and --outputs"
                 );
                 std::process::exit(1);
             }
-            ("user_input".to_string(), parse_tx(inputs_str, outputs_str))
+            (
+                "user_input".to_string(),
+                parse_tx(spec.inputs_str, spec.outputs_str),
+            )
         }
     }
 }
