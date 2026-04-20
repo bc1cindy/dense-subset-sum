@@ -19,8 +19,10 @@ pub mod validation;
 
 pub use dense_region::find_dense_region;
 pub use lookup::{
-    DEFAULT_MAX_ENTRIES, brute_force_w, dp_w, log_dp_w, log_lookup_w,
-    log_lookup_w_signed_target_aware, log_w_signed_adaptive, lookup_w,
+    DEFAULT_MAX_ENTRIES, LookupConfig, brute_force_w, dp_w, log_dp_w, log_lookup_w,
+    log_lookup_w_signed_target_aware, log_lookup_w_signed_target_aware_with_config,
+    log_lookup_w_with_config, log_w_signed_adaptive, log_w_signed_adaptive_with_config, lookup_w,
+    lookup_w_with_config,
 };
 pub use radix::{
     RADIX_BASES, arbitrary_distinctness_log2, best_radix_base, coverage_bonus_log2,

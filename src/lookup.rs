@@ -7,6 +7,46 @@ use crate::sasamoto::{gcd_slice, log_w_signed_sasamoto};
 /// 2^22 ≈ 4M entries fits in ~100MB; unbounded N≥20 with sat-scale values hits 10^9 entries (OOM).
 pub const DEFAULT_MAX_ENTRIES: usize = 4_194_304;
 
+/// Nominal per-entry size: `u64` sum + `u128` count. Real `HashMap` has bucket
+/// overhead on top, so this is a lower bound used to convert between the two
+/// knobs; pick a memory budget conservatively.
+const ENTRY_SIZE_BYTES: usize = std::mem::size_of::<(u64, u128)>();
+
+/// Maximum sumset during block convolution. Both `max_memory_bytes` and
+/// `max_entries` are exposed so callers can reason about whichever resource is
+/// scarce; use `from_memory_bytes` or `from_max_entries` to keep them consistent.
+/// `Default` reproduces 2^22-entry max (~100MB nominal).
+#[derive(Debug, Clone)]
+pub struct LookupConfig {
+    pub max_memory_bytes: usize,
+    pub max_entries: usize,
+}
+
+impl Default for LookupConfig {
+    fn default() -> Self {
+        Self {
+            max_memory_bytes: DEFAULT_MAX_ENTRIES * ENTRY_SIZE_BYTES,
+            max_entries: DEFAULT_MAX_ENTRIES,
+        }
+    }
+}
+
+impl LookupConfig {
+    pub fn from_memory_bytes(bytes: usize) -> Self {
+        Self {
+            max_memory_bytes: bytes,
+            max_entries: bytes / ENTRY_SIZE_BYTES,
+        }
+    }
+
+    pub fn from_max_entries(n: usize) -> Self {
+        Self {
+            max_memory_bytes: n * ENTRY_SIZE_BYTES,
+            max_entries: n,
+        }
+    }
+}
+
 /// Exact W(E) by enumerating 2^N subsets. Max N ≈ 25 in practice.
 pub fn brute_force_w(a: &[u64], e_target: u64) -> u64 {
     let n = a.len();
@@ -27,15 +67,35 @@ pub fn brute_force_w(a: &[u64], e_target: u64) -> u64 {
 /// to `f64` lose precision above 2^53 (f64 mantissa); that's acceptable for
 /// ratios/error reports but not for equality checks on large W.
 pub fn lookup_w(a: &[u64], e_target: u64, block_size: usize) -> Option<u128> {
+    lookup_w_with_config(a, e_target, block_size, &LookupConfig::default())
+}
+
+/// Like `lookup_w`, but with an explicit memory/entry max.
+pub fn lookup_w_with_config(
+    a: &[u64],
+    e_target: u64,
+    block_size: usize,
+    cfg: &LookupConfig,
+) -> Option<u128> {
     if a.is_empty() {
         return None;
     }
-    let combined = full_sumset(a, block_size, DEFAULT_MAX_ENTRIES);
+    let combined = full_sumset(a, block_size, cfg.max_entries);
     Some(*combined.get(&e_target).unwrap_or(&0))
 }
 
 pub fn log_lookup_w(a: &[u64], e_target: u64, block_size: usize) -> Option<f64> {
-    let w = lookup_w(a, e_target, block_size)?;
+    log_lookup_w_with_config(a, e_target, block_size, &LookupConfig::default())
+}
+
+/// Like `log_lookup_w`, but with an explicit memory/entry max.
+pub fn log_lookup_w_with_config(
+    a: &[u64],
+    e_target: u64,
+    block_size: usize,
+    cfg: &LookupConfig,
+) -> Option<f64> {
+    let w = lookup_w_with_config(a, e_target, block_size, cfg)?;
     if w == 0 {
         Some(f64::NEG_INFINITY)
     } else {
@@ -52,12 +112,29 @@ pub fn log_lookup_w_signed_target_aware(
     block_size: usize,
     max_entries: usize,
 ) -> Option<f64> {
+    log_lookup_w_signed_target_aware_with_config(
+        positives,
+        negatives,
+        target,
+        block_size,
+        &LookupConfig::from_max_entries(max_entries),
+    )
+}
+
+/// Like `log_lookup_w_signed_target_aware`, but with an explicit memory/entry cap.
+pub fn log_lookup_w_signed_target_aware_with_config(
+    positives: &[u64],
+    negatives: &[u64],
+    target: i64,
+    block_size: usize,
+    cfg: &LookupConfig,
+) -> Option<f64> {
     let abs_target = target.unsigned_abs();
     let pos_target = if target >= 0 { abs_target } else { 0 };
     let neg_target = if target < 0 { abs_target } else { 0 };
 
-    let pos_sums = full_sumset_near_target(positives, block_size, max_entries, pos_target);
-    let neg_sums = full_sumset_near_target(negatives, block_size, max_entries, neg_target);
+    let pos_sums = full_sumset_near_target(positives, block_size, cfg.max_entries, pos_target);
+    let neg_sums = full_sumset_near_target(negatives, block_size, cfg.max_entries, neg_target);
 
     let mut total: u128 = 0;
     for (&s_pos, &c_pos) in &pos_sums {
@@ -83,6 +160,23 @@ pub fn log_w_signed_adaptive(
     target: i64,
     block_size: usize,
 ) -> Option<f64> {
+    log_w_signed_adaptive_with_config(
+        positives,
+        negatives,
+        target,
+        block_size,
+        &LookupConfig::default(),
+    )
+}
+
+/// Like `log_w_signed_adaptive`, but with an explicit memory/entry cap.
+pub fn log_w_signed_adaptive_with_config(
+    positives: &[u64],
+    negatives: &[u64],
+    target: i64,
+    block_size: usize,
+    cfg: &LookupConfig,
+) -> Option<f64> {
     let n_total = positives.len() + negatives.len();
     if n_total >= 40
         && let Some(v) = log_w_signed_sasamoto(positives, negatives, target)
@@ -90,14 +184,8 @@ pub fn log_w_signed_adaptive(
     {
         return Some(v);
     }
-    log_lookup_w_signed_target_aware(
-        positives,
-        negatives,
-        target,
-        block_size,
-        DEFAULT_MAX_ENTRIES,
-    )
-    .filter(|v| v.is_finite())
+    log_lookup_w_signed_target_aware_with_config(positives, negatives, target, block_size, cfg)
+        .filter(|v| v.is_finite())
 }
 
 /// Exact W(E) via DP: O(N · sum_max). `None` when sum_max exceeds `max_table_size`.
@@ -290,6 +378,48 @@ fn full_sumset_near_target(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_lookup_config_default_matches_historical_max() {
+        let cfg = LookupConfig::default();
+        assert_eq!(cfg.max_entries, DEFAULT_MAX_ENTRIES);
+        assert_eq!(cfg.max_memory_bytes, DEFAULT_MAX_ENTRIES * ENTRY_SIZE_BYTES);
+    }
+
+    #[test]
+    fn test_lookup_config_constructors_round_trip() {
+        let from_mem = LookupConfig::from_memory_bytes(1_000_000);
+        assert_eq!(from_mem.max_memory_bytes, 1_000_000);
+        assert_eq!(from_mem.max_entries, 1_000_000 / ENTRY_SIZE_BYTES);
+
+        let from_entries = LookupConfig::from_max_entries(1000);
+        assert_eq!(from_entries.max_entries, 1000);
+        assert_eq!(from_entries.max_memory_bytes, 1000 * ENTRY_SIZE_BYTES);
+    }
+
+    #[test]
+    fn test_lookup_config_smaller_cap_is_looser_lower_bound() {
+        let a: Vec<u64> = (1..=20).collect();
+        let e = a.iter().sum::<u64>() / 2;
+
+        let tight = LookupConfig::from_max_entries(64);
+        let w_tight = lookup_w_with_config(&a, e, 4, &tight).unwrap();
+        let w_default = lookup_w_with_config(&a, e, 4, &LookupConfig::default()).unwrap();
+        let exact = brute_force_w(&a, e) as u128;
+
+        assert!(
+            w_tight <= w_default,
+            "tighter cap must produce ≤ W: tight={}, default={}",
+            w_tight,
+            w_default
+        );
+        assert!(
+            w_default <= exact,
+            "lookup must remain a lower bound: default={}, exact={}",
+            w_default,
+            exact
+        );
+    }
 
     #[test]
     fn test_convolve_capped_near_target_retains_target() {
