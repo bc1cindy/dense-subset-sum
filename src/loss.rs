@@ -1,5 +1,8 @@
-//! Cost function for co-spend aggregation: mean log₂ W_signed across coins,
+//! Subset-sum density scoring primitives: mean log₂ W_signed across coins,
 //! plus a 3-tier W(E) estimator (exact DP → lookup → Sasamoto).
+//!
+//! These are raw measurements. The cost-function framework that consumes them
+//! (scaling, thresholding, budget) lives outside this repo.
 
 use crate::validation;
 use crate::{
@@ -212,9 +215,9 @@ pub fn estimate_density(a: &[u64], e_target: u64, config: &LossConfig) -> Densit
 ///   other-input partitions reach this sub-transaction's input sum?"
 /// - [`score_sub_tx_signed`]: two-sided ±multiset probe. Asks "how many partitions of
 ///   the *other coins* (inputs minus outputs) reconcile this sub-tx's balance?" Returns
-///   nats. This is the per-coin privacy probe used by the MVP cost function.
-/// - [`marginal_score`]: `(before, after, delta)` mean signed privacy; accept when
-///   `delta > 0`. Used for evaluating whether adding inputs/outputs improves privacy.
+///   nats. This is the per-coin signed-multiset probe.
+/// - [`marginal_score`]: `(before, after, delta)` of mean signed log₂W per coin,
+///   comparing the current tx to the augmented tx.
 pub fn score(a: &[u64], e_target: u64, config: &LossConfig) -> f64 {
     let n = a.len();
     if n == 0 {
@@ -270,7 +273,7 @@ pub fn score_sub_tx_signed(
     crate::log_w_signed_adaptive(&other_outputs, &other_inputs, sub_balance, lookup_k)
 }
 
-/// Returns `(before, after, delta)`. Accept when `delta > threshold`.
+/// Returns `(before, after, delta)` of mean signed log₂W per coin.
 pub fn marginal_score(
     current_tx: &Transaction,
     new_inputs: &[u64],

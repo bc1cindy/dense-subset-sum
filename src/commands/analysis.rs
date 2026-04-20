@@ -58,14 +58,6 @@ pub(crate) fn cmd_marginal_score(
     println!("  before: {:.4}", before);
     println!("  after:  {:.4}", after);
     println!("  delta:  {:+.4}", delta);
-    println!();
-    if delta > 0.0 {
-        println!("→ JOIN: adding these coins increases privacy.");
-    } else if delta < 0.0 {
-        println!("→ SKIP: adding these coins decreases privacy.");
-    } else {
-        println!("→ NEUTRAL: no change in mean signed log₂W.");
-    }
 }
 
 pub(crate) fn cmd_analyze_tx(inputs_str: &str, outputs_str: &str) {
@@ -413,11 +405,8 @@ pub(crate) fn cmd_suggest_split(
             .collect::<Vec<_>>(),
     );
     if best_score.is_finite() {
-        println!(
-            "  Mean signed log₂ W across all coins: {:.4} (higher = more privacy)",
-            best_score
-        );
+        println!("  Mean signed log₂ W across all coins: {:.4}", best_score);
     } else {
-        println!("  (single-output case — no improvement from splitting)");
+        println!("  (single-output case — score undefined)");
     }
 }

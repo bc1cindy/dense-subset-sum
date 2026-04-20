@@ -76,7 +76,7 @@ pub fn log_lookup_w_signed_target_aware(
     }
 }
 
-/// Sasamoto for N ≥ 40, target-aware lookup otherwise. Recommended signed entry point.
+/// Sasamoto for N ≥ 40, target-aware lookup otherwise. Default signed entry point.
 pub fn log_w_signed_adaptive(
     positives: &[u64],
     negatives: &[u64],

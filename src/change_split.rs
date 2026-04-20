@@ -1,7 +1,7 @@
 //! Change decomposition — Maurer §5 output splitting.
 //!
 //! Separate from `loss` because change decomposition is a *search* over candidate
-//! output-side splits scored by the cost function, not the cost function itself.
+//! output-side splits ranked by mean signed log₂W.
 
 use crate::{Transaction, validation};
 

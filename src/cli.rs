@@ -76,7 +76,7 @@ enum Command {
         #[arg(short, long)]
         target: Option<u64>,
     },
-    /// Compute the privacy cost/score for a transaction
+    /// Per-coin mean signed log₂W for a transaction
     Cost {
         /// Comma-separated input values (satoshis)
         #[arg(short, long)]
@@ -267,7 +267,7 @@ enum Command {
         #[arg(long, default_value = "10000000")]
         dp_max: usize,
     },
-    /// Should I add UTXOs to this co-spend? Reports before/after/delta on signed log₂W.
+    /// Mean signed log₂W per coin: augmented tx vs base tx (reports before/after/delta).
     MarginalScore {
         /// Wasabi2 fixture label for the current tx. Overrides --inputs/--outputs.
         #[arg(long)]
@@ -291,7 +291,7 @@ enum Command {
         #[arg(short = 'k', long, default_value = "10")]
         block_size: usize,
     },
-    /// Low-Hamming-weight change decomposition that maximizes mean signed log₂W.
+    /// Rank low-Hamming-weight change decompositions by mean signed log₂W.
     SuggestSplit {
         /// Comma-separated input values (satoshis).
         #[arg(short, long)]

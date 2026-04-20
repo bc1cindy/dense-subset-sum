@@ -2,13 +2,13 @@
 
 A tool to measure **how private a CoinJoin transaction is**.
 
-Given the inputs and outputs of a Bitcoin CoinJoin, it counts (or approximates) how many alternative ways an observer could plausibly match inputs to outputs. More alternatives = more privacy. Fewer = the transaction leaks.
+Given the inputs and outputs of a Bitcoin CoinJoin, it counts (or approximates) how many alternative ways an observer could plausibly match inputs to outputs. The count itself is the output; interpretation of what counts as "enough" is left to the caller.
 
 You can use it to:
 
-- Score an existing CoinJoin transaction.
-- Decide whether joining a co-spend proposal actually helps.
-- Suggest how to split a change output to maximise ambiguity.
+- Measure subset-sum density (`W(E)`, `κ`, signed log₂W) on an existing CoinJoin transaction.
+- Compare the mean signed log₂W of a base tx against an augmented tx (adding inputs/outputs).
+- Enumerate candidate change decompositions and rank them by mean signed log₂W.
 - Validate the estimators against ground truth on real or synthetic data.
 
 ## Why this exists
@@ -23,7 +23,7 @@ Computing `W(E)` exactly is also exponential in the worst case, so the tool runs
 2. **Block-convolution lookup** for medium sets — a proven lower bound.
 3. **Asymptotic approximation** (Sasamoto / Toyoizumi / Nishimori) for large CoinJoins — fast, accurate at scale, but an approximation with error at finite N.
 
-Inspection commands (`compare`, `full-report`) print every applicable tier side-by-side so disagreements between estimators stay visible. Scoring commands that must return a single number (`cost`, `density`) pick the tier by regime and fall back to `min(Sasamoto, lookup)` once `N` is large enough for the asymptotic regime, so the reported number is never more optimistic than the proven lookup lower bound.
+Commands that print all tiers side-by-side (`compare`, `full-report`) keep disagreements between estimators visible. Commands that return a single number (`cost`, `density`) pick the tier by regime and fall back to `min(Sasamoto, lookup)` once `N` is large enough for the asymptotic regime, so the reported number is never more optimistic than the proven lookup lower bound.
 
 ## Install
 
@@ -43,7 +43,7 @@ The project ships with real Wasabi 2 transactions. Pick one and ask for the full
 $BIN full-report --tx-label w2_6a6dcc22_17in6out
 ```
 
-You'll see the transaction size and fee, density parameters (`κ`, `κ_c`), a per-coin privacy score, a radix check for standard denominations, and — when the tx is small enough — a cross-check against the expensive Boltzmann/CJA ground truth.
+You'll see the transaction size and fee, density parameters (`κ`, `κ_c`), per-coin signed log₂W values, a radix check for standard denominations, and — when the tx is small enough — a cross-check against the expensive Boltzmann/CJA ground truth.
 
 Then try the same on your own transaction:
 
@@ -60,17 +60,17 @@ $BIN full-report --tx-json path/to/tx.json
 ## Other commands, by purpose
 
 ```bash
-# Whole-tx privacy score and per-coin breakdown
+# Whole-tx mean signed log₂W and per-coin breakdown
 $BIN cost         -i ... -o ...
 $BIN coin-scores  -i ... -o ...
 
 # Count every plausible input→output mapping (small tx only)
 $BIN analyze-tx   -i ... -o ...
 
-# Should I add my UTXO to this co-spend? (before/after/delta)
+# Mean signed log₂W: augmented tx vs base tx (reports before/after/delta)
 $BIN marginal-score -i ... -o ... --new-inputs 50000000 --new-outputs 50000000
 
-# Decompose a change amount to maximise ambiguity
+# Rank change decompositions by mean signed log₂W
 $BIN suggest-split -i ... -o ... --change 7168 --max-pieces 6
 
 # Validate estimators against ground truth
@@ -119,7 +119,7 @@ Accuracy columns:
 ### Per-coin scores
 
 - **signed multiset probe** — for each coin, "if I remove this coin, how many ways can the others be split (with signs) so the books still balance?"
-- **log₂W_signed** — the log of that count. Higher = more interchangeable. `N/A` = unreachable, the coin has a unique role and leaks.
+- **log₂W_signed** — the log of that count. `N/A` = unreachable (no valid partition of the other coins balances the books without this one).
 
 ### Units
 
@@ -151,7 +151,7 @@ log W [Sasamoto]: log₂=-10.4138
 loss::score (log₂/N): 0.3401
 ```
 
-`estimator_picked` shows which tier was used. `κ > κ_c` at this E means sparse — `W = 0` at a single point doesn't contradict a globally dense tx. `loss::score` is the headline `log₂ W / N`, comparable across transactions.
+`estimator_picked` shows which tier was used. `κ > κ_c` at this E means sparse — `W = 0` at a single point doesn't contradict a globally dense tx. `loss::score` reports `log₂ W / N`, i.e. log₂W normalized per coin (comparable across transactions of different sizes).
 
 ### `coin-scores`
 
@@ -160,7 +160,7 @@ loss::score (log₂/N): 0.3401
   in    5   49000000   N/A
 ```
 
-Coins of the same value share a score (they are interchangeable). `N/A` = leak.
+Coins of the same value share a score. `N/A` = no partition reaches this coin's balance target.
 
 ### `compare-wasabi2`
 
@@ -184,17 +184,15 @@ Mean signed log₂W per coin:
   before: 4.9069
   after:  7.0340
   delta:  +2.1271
-
-→ JOIN: adding these coins increases privacy.
 ```
 
-Answers "is it worth adding my UTXO to this co-spend?"
+Reports how the mean signed log₂W per coin changes when the augmented coins are added.
 
-- **before** — mean signed log₂W per coin on the *current* tx (no new coins). Baseline privacy.
+- **before** — mean signed log₂W per coin on the *current* tx (no new coins).
 - **after**  — same mean, recomputed on the *augmented* tx (current + `--new-inputs` + `--new-outputs`).
-- **delta**  — `after − before`, in bits. Positive ⇒ adding these coins lifts the average ambiguity; negative ⇒ your UTXO sticks out and drags the average down.
+- **delta**  — `after − before`, in bits.
 
-`delta > 0` ⇒ JOIN. The score is the *mean* across all coins. A positive delta can hide that your specific UTXO gained less than the others. Run `coin-scores` on the augmented tx to see your row.
+The score is the *mean* across all coins, so a positive delta can mask a specific UTXO that gained less than the others. Run `coin-scores` on the augmented tx to see the per-coin breakdown. Interpretation of the delta is left to the caller; this command is a measurement, not a decision rule.
 
 ### `dense-boundary` / `subset-density`
 
