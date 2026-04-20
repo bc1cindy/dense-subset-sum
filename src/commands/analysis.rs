@@ -1,8 +1,8 @@
 //! Per-tx full reports, per-coin measurements, estimator correlation, and split suggestions.
 
 use dense_subset_sum::{
-    brute_force_w, change_split, density_regime, estimator, fixtures, kappa, log_lookup_w,
-    log_w_for_e_sat, mappings, validation,
+    brute_force_w, change_split, estimator, fixtures, kappa, log_lookup_w, log_w_for_e_sat,
+    mappings, validation,
 };
 
 use super::{
@@ -230,10 +230,6 @@ pub(crate) fn cmd_full_report(
         dense_str,
         regime.estimator.as_str()
     );
-    if let Some((k, kc, _)) = density_regime(&tx.inputs, target_half) {
-        println!("  density_regime at Σin/2: κ = {:.4}, κ_c = {:.4}", k, kc);
-    }
-
     println!(
         "\n── W estimators at midpoint (target = Σin/2 = {}) ──",
         target_half

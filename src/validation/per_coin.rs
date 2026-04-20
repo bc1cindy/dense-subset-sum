@@ -2,7 +2,8 @@
 
 use super::exclude_values;
 use crate::{
-    DEFAULT_MAX_ENTRIES, Transaction, log_lookup_w_signed_target_aware, log_w_signed_sasamoto,
+    DEFAULT_MAX_ENTRIES, Transaction, kappa_c, log_lookup_w_signed_target_aware,
+    log_w_signed_sasamoto,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +28,10 @@ pub struct CoinMeasurement {
     pub value: u64,
     pub log_w_signed: Option<f64>,
     pub n_other_coins: usize,
+    /// κ_c(x) evaluated at this coin's natural target `x = value / (N_in · max(inputs))`
+    /// the critical density that applies if this coin's value were the subset-sum target E.
+    /// `None` when x ∉ (0, 1) (e.g. an output larger than N·L).
+    pub kappa_c_at_value: Option<f64>,
 }
 
 /// Zero-fee signed probe: count signed partitions of the other coins balancing `value`.
@@ -67,6 +72,15 @@ fn per_coin_measurements_inner(
     let fee = tx.input_sum().saturating_sub(tx.output_sum());
     let input_sum = tx.input_sum();
 
+    let n_in = tx.inputs.len() as f64;
+    let l_in = tx.inputs.iter().copied().max().unwrap_or(0) as f64;
+    let kappa_c_at = |value: u64| -> Option<f64> {
+        if n_in <= 0.0 || l_in <= 0.0 {
+            return None;
+        }
+        kappa_c(value as f64 / (n_in * l_in))
+    };
+
     for (i, &value) in tx.inputs.iter().enumerate() {
         let other_inputs = exclude_values(&tx.inputs, &[value]);
         let other_outputs = tx.outputs.clone();
@@ -85,6 +99,7 @@ fn per_coin_measurements_inner(
             value,
             log_w_signed,
             n_other_coins: other_inputs.len() + other_outputs.len(),
+            kappa_c_at_value: kappa_c_at(value),
         });
     }
 
@@ -99,6 +114,7 @@ fn per_coin_measurements_inner(
             value,
             log_w_signed,
             n_other_coins: other_inputs.len() + other_outputs.len(),
+            kappa_c_at_value: kappa_c_at(value),
         });
     }
 
@@ -119,20 +135,24 @@ pub fn print_per_coin_measurements(
 
     let ln2 = 2.0_f64.ln();
     println!(
-        "{:>4} {:>4} {:>15} {:>15}",
-        "role", "idx", "value", "log2_w_signed"
+        "{:>4} {:>4} {:>15} {:>15} {:>10}",
+        "role", "idx", "value", "log2_w_signed", "κ_c"
     );
-    println!("{:─<45}", "");
+    println!("{:─<52}", "");
     for s in measurements {
         let sg = s
             .log_w_signed
             .map_or("N/A".into(), |v| format!("{:.3}", v / ln2));
+        let kc = s
+            .kappa_c_at_value
+            .map_or("N/A".into(), |v| format!("{:.4}", v));
         println!(
-            "{:>4} {:>4} {:>15} {:>15}",
+            "{:>4} {:>4} {:>15} {:>15} {:>10}",
             s.role.as_str(),
             s.index,
             s.value,
-            sg
+            sg,
+            kc
         );
     }
 
@@ -290,6 +310,30 @@ mod tests {
             has_difference,
             "fee-aware measurements should differ from non-fee-aware when fee > 0"
         );
+    }
+
+    #[test]
+    fn test_per_coin_measurements_populate_kappa_c_at_value() {
+        // N_in=3, L_in=max=3 → x_i = v_i / (N·L) = v_i / 9.
+        // Expected: kappa_c(v/9) matches a direct call for every coin (in and out).
+        let tx = Transaction::new(vec![1, 2, 3], vec![6]);
+        let measurements = per_coin_measurements(&tx, 3);
+        let n = tx.inputs.len() as f64;
+        let l = *tx.inputs.iter().max().unwrap() as f64;
+        for m in &measurements {
+            let expected = crate::kappa_c(m.value as f64 / (n * l));
+            match (m.kappa_c_at_value, expected) {
+                (Some(a), Some(b)) => assert!(
+                    (a - b).abs() < 1e-12,
+                    "κ_c mismatch for v={}: got {}, expected {}",
+                    m.value,
+                    a,
+                    b
+                ),
+                (None, None) => {}
+                other => panic!("κ_c presence mismatch for v={}: {:?}", m.value, other),
+            }
+        }
     }
 
     #[test]

@@ -43,7 +43,7 @@ The project ships with real Wasabi 2 transactions. Pick one and ask for the full
 $BIN full-report --tx-label w2_6a6dcc22_17in6out
 ```
 
-You'll see the transaction size and fee, density parameters (`κ`, `κ_c`), per-coin signed log₂W values, a radix check for standard denominations, and — when the tx is small enough — a cross-check against the expensive Boltzmann/CJA ground truth.
+You'll see the transaction size and fee, the tx-level density `κ` (using `max(aᵢ)` as an ensemble range proxy), per-coin signed log₂W values, a radix check for standard denominations, and when the tx is small enough, a cross-check against the expensive Boltzmann/CJA ground truth. `κ_c` is a function of the target `E` (Sasamoto eq 4.3), not a single tx-level number, sweep `κ_c(x)` across the E-band with `$BIN dense-boundary`.
 
 Then try the same on your own transaction:
 
@@ -95,8 +95,8 @@ cargo test --release --lib
 
 ### Density parameters
 
-- **κ = log₂(max value) / N** — how dense the inputs are. Low κ → subsets collide on many sums → ambiguity. High κ → unique sums → traceable.
-- **κ_c** — the critical density for the given E (paper eq. 4.3). The transaction is in the **dense regime** when `κ < κ_c`. Dense means the approximation is meaningful; sparse means W is likely small or zero.
+- **κ = log₂(max value) / N** — how dense the inputs are. Low κ → subsets collide on many sums → ambiguity. High κ → unique sums → traceable. This is a single tx-level number; `max(aᵢ)` is used as a proxy for the ensemble range `L`.
+- **κ_c(x)** — the critical density as a function of the normalized target `x = E / (N·L)` (paper eq. 4.3). The tx is in the **dense regime** at a given `E` when `κ < κ_c(x)`. Because κ_c depends on E, there is no single tx-level κ_c — use `dense-boundary` to sweep κ_c(x) across the E-band and find the dense range.
 - **Regime tag**:
   - `EXACT` — small N: ground truth comes from enumeration. Ignore Sasamoto's error here.
   - `ASYMPTOTIC` — large N: the approximation is trustworthy.
@@ -145,22 +145,28 @@ For equal-amount CoinJoins (Wasabi 2, Whirlpool):
 
 ```
 κ = 1.5044, radix-like = true, estimator_picked = lookup
-density_regime at Σin/2: κ = 1.5044, κ_c = 0.9817
 log W [lookup]: W = 0 (unreachable)
 log W [Sasamoto]: log₂=-10.4138
 estimator::estimate (log₂/N): 0.3401
 ```
 
-`estimator_picked` shows which tier was used. `κ > κ_c` at this E means sparse — `W = 0` at a single point doesn't contradict a globally dense tx. `estimator::estimate` reports `log₂ W / N`, i.e. log₂W normalized per coin (comparable across transactions of different sizes).
+`estimator_picked` shows which tier was used. `W = 0` at a single point doesn't contradict a globally dense tx — for the `κ_c(x)` profile across E and the dense E-band, run `dense-boundary`. `estimator::estimate` reports `log₂ W / N`, i.e. log₂W normalized per coin (comparable across transactions of different sizes).
 
 ### `coin-measures`
 
 ```
-  in    0   50000000   5.907
-  in    5   49000000   N/A
+  in    0   50000000   5.907   0.6235
+  in    5   49000000     N/A   0.6177
 ```
 
-Coins of the same value share a measurement. `N/A` = no partition reaches this coin's balance target.
+Columns:
+- **role** — `in` (input) or `out` (output).
+- **idx** — position in the input or output list.
+- **value** — the coin's amount in satoshis.
+- **log₂W_signed** — log₂ of the number of ± arrangements of the *other* coins that balance the books in this coin's place. `N/A` = no such arrangement exists (this coin is structurally required for the tx to balance).
+- **κ_c** — critical density evaluated at this coin's natural `x = value / (N_in · max(inputs))`. Compare to the tx-level `κ`: coins with `κ < κ_c` are in the dense E-band at their own value. Per-coin view of κ/κ_c — no single "representative" E is chosen for the whole tx.
+
+Coins of the same value share a measurement.
 
 ### `compare-wasabi2`
 
