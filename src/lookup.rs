@@ -1,4 +1,12 @@
-//! Block-convolution and DP lower bounds on W(E). All estimators are sound.
+//! Sumset counts W(E) = #{S ⊆ A : ΣS = E}, three redundant ways:
+//!
+//! - [`brute_force_w`]: exact, N ≲ 25.
+//! - [`dp_w`]: exact DP, bails past `max_table_size`.
+//! - [`lookup_w`]: block-convolution lower bound, scales via [`LookupConfig`].
+//!
+//! Signed variants ([`log_w_signed`]) handle ΣS − ΣT = target. Tests
+//! cross-check all three; the `estimator` module falls back lookup ← dp when
+//! DP overflows.
 
 use std::collections::HashMap;
 
