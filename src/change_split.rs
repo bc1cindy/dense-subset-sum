@@ -78,15 +78,15 @@ pub fn suggest_output_split(
     }
 
     let mut best_split = vec![change_amount];
-    let mut best_score = f64::NEG_INFINITY;
+    let mut best_mean = f64::NEG_INFINITY;
 
     for candidate in &candidates {
         let mut test_outputs = tx.outputs.clone();
         test_outputs.extend_from_slice(candidate);
         let test_tx = Transaction::new(tx.inputs.clone(), test_outputs);
-        let scores = validation::per_coin_scores_signed(&test_tx, lookup_k);
+        let measurements = validation::per_coin_measurements(&test_tx, lookup_k);
         let ln2 = std::f64::consts::LN_2;
-        let reachable: Vec<f64> = scores
+        let reachable: Vec<f64> = measurements
             .iter()
             .filter_map(|c| c.log_w_signed)
             .map(|v| v / ln2)
@@ -96,13 +96,13 @@ pub fn suggest_output_split(
         } else {
             reachable.iter().sum::<f64>() / reachable.len() as f64
         };
-        if mean > best_score {
-            best_score = mean;
+        if mean > best_mean {
+            best_mean = mean;
             best_split = candidate.clone();
         }
     }
 
-    (best_split, best_score)
+    (best_split, best_mean)
 }
 
 #[cfg(test)]
@@ -113,9 +113,9 @@ mod tests {
     fn test_suggest_output_split_preserves_total() {
         let tx = Transaction::new(vec![100, 200, 300], vec![100, 200, 250]);
         let change = 50u64;
-        let (split, score) = suggest_output_split(&tx, change, 4, 3);
+        let (split, mean) = suggest_output_split(&tx, change, 4, 3);
         assert_eq!(split.iter().sum::<u64>(), change);
-        assert!(score.is_finite() || split.len() == 1);
+        assert!(mean.is_finite() || split.len() == 1);
     }
 
     #[test]
@@ -128,16 +128,16 @@ mod tests {
     #[test]
     fn test_suggest_output_split_picks_best() {
         let tx = Transaction::new(vec![100, 100, 100, 100], vec![100, 100, 100, 50]);
-        let (split, best_score) = suggest_output_split(&tx, 50, 4, 3);
+        let (split, best_mean) = suggest_output_split(&tx, 50, 4, 3);
         assert_eq!(split.iter().sum::<u64>(), 50);
         let single_tx = Transaction::new(tx.inputs.clone(), {
             let mut o = tx.outputs.clone();
             o.push(50);
             o
         });
-        let single_scores = validation::per_coin_scores_signed(&single_tx, 3);
+        let single_measurements = validation::per_coin_measurements(&single_tx, 3);
         let ln2 = std::f64::consts::LN_2;
-        let r: Vec<f64> = single_scores
+        let r: Vec<f64> = single_measurements
             .iter()
             .filter_map(|c| c.log_w_signed)
             .map(|v| v / ln2)
@@ -147,6 +147,6 @@ mod tests {
         } else {
             r.iter().sum::<f64>() / r.len() as f64
         };
-        assert!(best_score >= single_mean - 1e-9);
+        assert!(best_mean >= single_mean - 1e-9);
     }
 }

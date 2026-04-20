@@ -39,7 +39,8 @@ pub(crate) fn cmd_marginal_score(
         lookup_k: block_size,
         ..Default::default()
     };
-    let (before, after, delta) = estimator::marginal_score(&tx, &new_inputs, &new_outputs, &config);
+    let (before, after, delta) =
+        estimator::compare_augmented(&tx, &new_inputs, &new_outputs, &config);
 
     println!(
         "Base tx: {} ({} in / {} out)",
@@ -169,11 +170,11 @@ pub(crate) fn cmd_cost(inputs_str: &str, outputs_str: &str, block_size: usize) {
     println!("\n{:>12}  {:>10}", "Input", "Score");
     println!("{:─<24}", "");
     for (i, &val) in tx.inputs.iter().enumerate() {
-        let s = estimator::score_sub_tx(&tx, &[i], &config);
+        let s = estimator::estimate_sub_tx(&tx, &[i], &config);
         println!("{:>12}  {:>10.4}", val, s);
     }
 
-    let avg = estimator::score(&tx.inputs, tx.inputs.iter().sum::<u64>() / 2, &config);
+    let avg = estimator::estimate(&tx.inputs, tx.inputs.iter().sum::<u64>() / 2, &config);
     println!("\nMidpoint score: {:.4}", avg);
 }
 
@@ -186,8 +187,8 @@ pub(crate) fn cmd_coin_scores(
 ) {
     let (label, tx) = resolve_tx(tx_label, tx_json, inputs_str, outputs_str);
 
-    let scores = validation::per_coin_scores_signed(&tx, block_size);
-    validation::print_per_coin_scores(&label, &tx, &scores);
+    let measurements = validation::per_coin_measurements(&tx, block_size);
+    validation::print_per_coin_measurements(&label, &tx, &measurements);
 }
 
 pub(crate) fn cmd_full_report(
@@ -248,14 +249,14 @@ pub(crate) fn cmd_full_report(
         "  log W  [Sasamoto]:       {}",
         fmt_log_w(sasamoto_mid, ln2)
     );
-    let score_mid = estimator::score(&tx.inputs, target_half, &cfg);
+    let mean_mid = estimator::estimate(&tx.inputs, target_half, &cfg);
     println!(
-        "  estimator::score (log₂/N):    {:.4}  (N={})",
-        score_mid, n_in
+        "  estimator::estimate (log₂/N): {:.4}  (N={})",
+        mean_mid, n_in
     );
 
     println!("\n── Per-coin ambiguity ──");
-    let coins_sg = validation::per_coin_scores_signed(&tx, block_size);
+    let coins_sg = validation::per_coin_measurements(&tx, block_size);
     per_coin_summary("Signed", &coins_sg, ln2);
 
     println!("\n── CJA mappings vs W (Maurer/Boltzmann) ──");
@@ -336,7 +337,7 @@ pub(crate) fn cmd_calibrate_privacy(max_coins: usize, block_size: usize) {
             Some(v) if v.is_finite() => v / ln2,
             _ => continue,
         };
-        let coins = validation::per_coin_scores_signed(&tx, block_size);
+        let coins = validation::per_coin_measurements(&tx, block_size);
         let vals: Vec<f64> = coins.iter().filter_map(|c| c.log_w_signed).collect();
         if vals.is_empty() {
             continue;
@@ -385,7 +386,7 @@ pub(crate) fn cmd_suggest_split(
     let outputs = parse_values(outputs_str);
     let tx = Transaction::new(inputs.clone(), outputs.clone());
 
-    let (best_split, best_score) =
+    let (best_split, best_mean) =
         change_split::suggest_output_split(&tx, change, max_pieces, block_size);
 
     println!(
@@ -407,9 +408,9 @@ pub(crate) fn cmd_suggest_split(
             .map(|v| v.count_ones())
             .collect::<Vec<_>>(),
     );
-    if best_score.is_finite() {
-        println!("  Mean signed log₂ W across all coins: {:.4}", best_score);
+    if best_mean.is_finite() {
+        println!("  Mean signed log₂ W across all coins: {:.4}", best_mean);
     } else {
-        println!("  (single-output case — score undefined)");
+        println!("  (single-output case — mean undefined)");
     }
 }

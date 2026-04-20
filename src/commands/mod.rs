@@ -166,10 +166,10 @@ pub(super) fn fmt_log_w(v: Option<f64>, ln2: f64) -> String {
     }
 }
 
-pub(super) fn per_coin_summary(tag: &str, scores: &[validation::CoinScore], ln2: f64) {
-    let vals: Vec<f64> = scores.iter().filter_map(|c| c.log_w_signed).collect();
+pub(super) fn per_coin_summary(tag: &str, measurements: &[validation::CoinMeasurement], ln2: f64) {
+    let vals: Vec<f64> = measurements.iter().filter_map(|c| c.log_w_signed).collect();
     if vals.is_empty() {
-        println!("  {:>9}: no finite per-coin scores", tag);
+        println!("  {:>9}: no finite per-coin measurements", tag);
         return;
     }
     let max = vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
@@ -179,7 +179,7 @@ pub(super) fn per_coin_summary(tag: &str, scores: &[validation::CoinScore], ln2:
         "  {:>9}: coins={:>3}/{:>3}  max log₂W={:6.2}  mean={:5.2}  min={:5.2}",
         tag,
         vals.len(),
-        scores.len(),
+        measurements.len(),
         max / ln2,
         mean / ln2,
         min / ln2

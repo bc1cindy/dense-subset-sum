@@ -148,10 +148,10 @@ For equal-amount CoinJoins (Wasabi 2, Whirlpool):
 density_regime at Σin/2: κ = 1.5044, κ_c = 0.9817
 log W [lookup]: W = 0 (unreachable)
 log W [Sasamoto]: log₂=-10.4138
-estimator::score (log₂/N): 0.3401
+estimator::estimate (log₂/N): 0.3401
 ```
 
-`estimator_picked` shows which tier was used. `κ > κ_c` at this E means sparse — `W = 0` at a single point doesn't contradict a globally dense tx. `estimator::score` reports `log₂ W / N`, i.e. log₂W normalized per coin (comparable across transactions of different sizes).
+`estimator_picked` shows which tier was used. `κ > κ_c` at this E means sparse — `W = 0` at a single point doesn't contradict a globally dense tx. `estimator::estimate` reports `log₂ W / N`, i.e. log₂W normalized per coin (comparable across transactions of different sizes).
 
 ### `coin-scores`
 
@@ -223,7 +223,7 @@ Boltzmann entropy collapses to 0 when every mapping shares the same deterministi
 use dense_subset_sum::{Transaction, estimator};
 
 let tx = Transaction::new(vec![/* input sats */], vec![/* output sats */]);
-let score = estimator::score(
+let estimate = estimator::estimate(
     &tx.inputs,
     tx.inputs.iter().sum::<u64>() / 2,
     &Default::default(),

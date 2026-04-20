@@ -1,4 +1,4 @@
-//! Subset-sum density scoring primitives: mean log₂ W_signed across coins,
+//! Subset-sum density estimation primitives: mean log₂ W_signed across coins,
 //! plus a 3-tier W(E) estimator (exact DP → lookup → Sasamoto).
 //!
 //! These are raw measurements. The cost-function framework that consumes them
@@ -207,18 +207,18 @@ pub fn estimate_density(a: &[u64], e_target: u64, config: &EstimatorConfig) -> D
 
 /// log₂(W) / N, normalized by coin count for cross-tx comparability. 0 when W ≤ 1.
 ///
-/// ## Which score function when
+/// ## Which estimator when
 ///
-/// - [`score`]: unsigned, one-sided. Asks "how many subsets of `a` sum to `e_target`?"
+/// - [`estimate`]: unsigned, one-sided. Asks "how many subsets of `a` sum to `e_target`?"
 ///   Used for raw density over a single target. Normalized per-coin (log₂W/N).
-/// - [`score_sub_tx`]: [`score`] applied to `(other_inputs, Σ(sub_tx))`. Asks "how many
+/// - [`estimate_sub_tx`]: [`estimate`] applied to `(other_inputs, Σ(sub_tx))`. Asks "how many
 ///   other-input partitions reach this sub-transaction's input sum?"
-/// - [`score_sub_tx_signed`]: two-sided ±multiset probe. Asks "how many partitions of
+/// - [`estimate_sub_tx_signed`]: two-sided ±multiset probe. Asks "how many partitions of
 ///   the *other coins* (inputs minus outputs) reconcile this sub-tx's balance?" Returns
 ///   nats. This is the per-coin signed-multiset probe.
-/// - [`marginal_score`]: `(before, after, delta)` of mean signed log₂W per coin,
+/// - [`compare_augmented`]: `(before, after, delta)` of mean signed log₂W per coin,
 ///   comparing the current tx to the augmented tx.
-pub fn score(a: &[u64], e_target: u64, config: &EstimatorConfig) -> f64 {
+pub fn estimate(a: &[u64], e_target: u64, config: &EstimatorConfig) -> f64 {
     let n = a.len();
     if n == 0 {
         return 0.0;
@@ -229,7 +229,7 @@ pub fn score(a: &[u64], e_target: u64, config: &EstimatorConfig) -> f64 {
     }
 }
 
-pub fn score_sub_tx(
+pub fn estimate_sub_tx(
     tx: &Transaction,
     sub_tx_input_indices: &[usize],
     config: &EstimatorConfig,
@@ -244,12 +244,12 @@ pub fn score_sub_tx(
         .map(|(_, &v)| v)
         .collect();
 
-    score(&other_inputs, sub_tx_sum, config)
+    estimate(&other_inputs, sub_tx_sum, config)
 }
 
 /// Signed ±multiset probe: how many partitions of the other coins match
 /// `Σ(my_inputs) - Σ(my_outputs)`? Returns `log W_signed` in nats.
-pub fn score_sub_tx_signed(
+pub fn estimate_sub_tx_signed(
     tx: &Transaction,
     my_input_indices: &[usize],
     my_output_indices: &[usize],
@@ -278,13 +278,13 @@ pub fn score_sub_tx_signed(
 }
 
 /// Returns `(before, after, delta)` of mean signed log₂W per coin.
-pub fn marginal_score(
+pub fn compare_augmented(
     current_tx: &Transaction,
     new_inputs: &[u64],
     new_outputs: &[u64],
     config: &EstimatorConfig,
 ) -> (f64, f64, f64) {
-    let score_before = tx_signed_privacy(current_tx, config);
+    let mean_before = tx_mean_signed(current_tx, config);
 
     let mut aug_inputs = current_tx.inputs.clone();
     aug_inputs.extend_from_slice(new_inputs);
@@ -292,21 +292,21 @@ pub fn marginal_score(
     aug_outputs.extend_from_slice(new_outputs);
     let aug_tx = Transaction::new(aug_inputs, aug_outputs);
 
-    let score_after = tx_signed_privacy(&aug_tx, config);
-    let delta = score_after - score_before;
+    let mean_after = tx_mean_signed(&aug_tx, config);
+    let delta = mean_after - mean_before;
 
-    (score_before, score_after, delta)
+    (mean_before, mean_after, delta)
 }
 
 /// Mean log₂ W_signed over all coins. 0 for degenerate txs.
-fn tx_signed_privacy(tx: &Transaction, config: &EstimatorConfig) -> f64 {
+fn tx_mean_signed(tx: &Transaction, config: &EstimatorConfig) -> f64 {
     let total_coins = tx.inputs.len() + tx.outputs.len();
     if total_coins < 2 {
         return 0.0;
     }
-    let scores = validation::per_coin_scores_signed_fee_aware(tx, config.lookup_k);
+    let measurements = validation::per_coin_measurements_fee_aware(tx, config.lookup_k);
     let ln2 = std::f64::consts::LN_2;
-    let reachable: Vec<f64> = scores
+    let reachable: Vec<f64> = measurements
         .iter()
         .filter_map(|c| c.log_w_signed)
         .map(|v| v / ln2)
@@ -355,18 +355,18 @@ mod tests {
     use crate::fixtures;
 
     #[test]
-    fn test_score_zero_degenerate() {
+    fn test_estimate_zero_degenerate() {
         let cfg = EstimatorConfig::default();
-        assert_eq!(score(&[10, 20, 30], 100, &cfg), 0.0);
-        assert_eq!(score(&[], 10, &cfg), 0.0);
-        assert_eq!(score(&[10], 0, &cfg), 0.0);
+        assert_eq!(estimate(&[10, 20, 30], 100, &cfg), 0.0);
+        assert_eq!(estimate(&[], 10, &cfg), 0.0);
+        assert_eq!(estimate(&[10], 0, &cfg), 0.0);
     }
 
     #[test]
-    fn test_score_increases_with_n() {
+    fn test_estimate_increases_with_n() {
         let config = EstimatorConfig::default();
-        let s10 = score(&(1..=10).collect::<Vec<u64>>(), 27, &config);
-        let s20 = score(&(1..=20).collect::<Vec<u64>>(), 105, &config);
+        let s10 = estimate(&(1..=10).collect::<Vec<u64>>(), 27, &config);
+        let s20 = estimate(&(1..=20).collect::<Vec<u64>>(), 105, &config);
         assert!(s20 > s10, "s10={}, s20={}", s10, s20);
     }
 
@@ -399,7 +399,7 @@ mod tests {
     }
 
     #[test]
-    fn test_score_small_n_uses_exact_dp() {
+    fn test_estimate_small_n_uses_exact_dp() {
         let a: Vec<u64> = (11..=26).collect();
         let cfg = EstimatorConfig {
             radix_hw_threshold: 1,
@@ -408,12 +408,12 @@ mod tests {
         let target: u64 = a.iter().sum::<u64>() / 2;
         let regime = analyze_regime(&Transaction::new(a.clone(), vec![target]), &cfg);
         assert_eq!(regime.estimator, EstimatorChoice::ExactDp);
-        let s = score(&a, target, &cfg);
+        let s = estimate(&a, target, &cfg);
         assert!(s > 0.0);
     }
 
     #[test]
-    fn test_score_exact_dp_falls_back_when_table_too_big() {
+    fn test_estimate_exact_dp_falls_back_when_table_too_big() {
         let a: Vec<u64> = vec![10_000_000, 20_000_000, 30_000_000, 40_000_000, 50_000_000];
         let cfg = EstimatorConfig {
             exact_threshold: 20,
@@ -421,33 +421,33 @@ mod tests {
             lookup_k: 4,
             ..Default::default()
         };
-        let s = score(&a, 60_000_000, &cfg);
+        let s = estimate(&a, 60_000_000, &cfg);
         assert!(s.is_finite());
     }
 
     #[test]
-    fn test_score_radix_uses_lookup() {
+    fn test_estimate_radix_uses_lookup() {
         let a: Vec<u64> = vec![1, 2, 4, 8, 16, 32, 64, 128, 256, 512];
         let config = EstimatorConfig {
             radix_hw_threshold: 1,
             ..Default::default()
         };
-        let s = score(&a, 500, &config);
+        let s = estimate(&a, 500, &config);
         assert!(s >= 0.0);
     }
 
     #[test]
-    fn test_marginal_score_positive() {
+    fn test_compare_augmented_positive() {
         let base_tx = Transaction::new(vec![100, 200, 300], vec![150, 250, 200]);
         let config = EstimatorConfig::default();
-        let (before, after, _) = marginal_score(&base_tx, &[400, 500], &[450, 450], &config);
+        let (before, after, _) = compare_augmented(&base_tx, &[400, 500], &[450, 450], &config);
         assert!(after >= before);
     }
 
     #[test]
-    fn test_score_sub_tx() {
+    fn test_estimate_sub_tx() {
         let tx = Transaction::new(vec![10, 20, 30, 40, 50], vec![30, 50, 70]);
-        let s = score_sub_tx(&tx, &[0, 1], &EstimatorConfig::default());
+        let s = estimate_sub_tx(&tx, &[0, 1], &EstimatorConfig::default());
         assert!(s >= 0.0);
     }
 
@@ -482,14 +482,14 @@ mod tests {
         ];
 
         let mut tx = Transaction::new(participants[0].0.clone(), participants[0].1.clone());
-        let mut scores = vec![tx_signed_privacy(&tx, &config)];
+        let mut means = vec![tx_mean_signed(&tx, &config)];
         for (inputs, outputs) in &participants[1..] {
             tx.inputs.extend(inputs);
             tx.outputs.extend(outputs);
-            scores.push(tx_signed_privacy(&tx, &config));
+            means.push(tx_mean_signed(&tx, &config));
         }
 
-        assert!(*scores.last().unwrap() >= scores[0]);
+        assert!(*means.last().unwrap() >= means[0]);
     }
 
     #[test]
@@ -502,17 +502,17 @@ mod tests {
     }
 
     #[test]
-    fn test_score_sub_tx_signed_balanced() {
+    fn test_estimate_sub_tx_signed_balanced() {
         let tx = Transaction::new(vec![100, 200, 300, 400], vec![150, 150, 300, 400]);
-        let log_w = score_sub_tx_signed(&tx, &[0, 1], &[0, 1], 3);
+        let log_w = estimate_sub_tx_signed(&tx, &[0, 1], &[0, 1], 3);
         assert!(log_w.is_some());
         assert!(log_w.unwrap() >= 0.0);
     }
 
     #[test]
-    fn test_score_sub_tx_signed_single_coin() {
+    fn test_estimate_sub_tx_signed_single_coin() {
         let tx = Transaction::new(vec![10, 20, 30], vec![10, 20, 30]);
-        assert!(score_sub_tx_signed(&tx, &[0], &[0], 3).is_some());
+        assert!(estimate_sub_tx_signed(&tx, &[0], &[0], 3).is_some());
     }
 
     #[test]
@@ -588,11 +588,11 @@ mod tests {
     }
 
     #[test]
-    fn test_score_matches_estimate_density() {
+    fn test_estimate_matches_estimate_density() {
         let a: Vec<u64> = (1..=15).collect();
         let e = 60u64;
         let cfg = EstimatorConfig::default();
-        let s = score(&a, e, &cfg);
+        let s = estimate(&a, e, &cfg);
         let de = estimate_density(&a, e, &cfg);
         let expected = match de.log_w {
             Some(lw) if lw > 0.0 => lw / (a.len() as f64 * 2.0_f64.ln()),

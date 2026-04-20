@@ -12,8 +12,8 @@ pub use mappings_pipeline::{
     print_mapping_correlation, print_mapping_summary, validate_estimators,
 };
 pub use per_coin::{
-    CoinRole, CoinScore, per_coin_scores_signed, per_coin_scores_signed_fee_aware,
-    print_per_coin_scores,
+    CoinMeasurement, CoinRole, per_coin_measurements, per_coin_measurements_fee_aware,
+    print_per_coin_measurements,
 };
 pub use sub_tx_estimates::{SubTxEstimate, estimate_sub_txs};
 
