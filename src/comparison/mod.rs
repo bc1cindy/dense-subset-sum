@@ -8,10 +8,11 @@ mod report;
 
 pub use core::{
     BatchRow, CompareMode, CompareRegime, ComparisonReport, ComparisonRow, EstimatorSummary,
-    aggregate_reports, classify_regime, compare, compare_dp_ground_truth, uniform_random_set,
+    aggregate_reports, classify_regime, compare, compare_dp_ground_truth, compare_with_config,
+    uniform_random_set,
 };
 pub use empirical::{EmpiricalDistribution, random_coinjoin};
-pub use monte_carlo::compare_monte_carlo;
+pub use monte_carlo::{compare_monte_carlo, compare_monte_carlo_with_config};
 pub use report::{print_batch_summary, print_report, print_report_csv};
 
 #[cfg(test)]

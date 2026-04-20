@@ -272,6 +272,13 @@ enum Command {
         /// Monte Carlo timeout in milliseconds (only used when N > 25).
         #[arg(long, default_value = "60000")]
         timeout_ms: u64,
+        /// Lookup-table memory budget (MB). Overrides the default ~100 MB cap.
+        #[arg(long)]
+        lookup_memory_mb: Option<usize>,
+        /// Output-binning width for the lookup table. `1` (default) is exact;
+        /// `>1` quantizes sumset keys to `floor(sum/sat_per_bin)` buckets.
+        #[arg(long, default_value = "1")]
+        sat_per_bin: u64,
     },
     /// Sasamoto vs DP ground truth on synthetic uniform inputs at large N.
     CompareSynthetic {
@@ -421,6 +428,8 @@ pub fn run(cli: Cli) {
             divisor,
             samples,
             timeout_ms,
+            lookup_memory_mb,
+            sat_per_bin,
         } => cmd_compare_empirical(
             n,
             seed,
@@ -430,6 +439,8 @@ pub fn run(cli: Cli) {
             divisor,
             samples,
             timeout_ms,
+            lookup_memory_mb,
+            sat_per_bin,
         ),
         Command::CompareSynthetic {
             n,

@@ -7,6 +7,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 use super::core::{CompareMode, ComparisonReport, build_report_from_counts};
+use crate::LookupConfig;
 
 /// Sample-count interval between timeout checks in `compare_monte_carlo`.
 const MC_TIMEOUT_CHECK_INTERVAL: u64 = 1024;
@@ -16,6 +17,33 @@ pub fn compare_monte_carlo(
     a: &[u64],
     min_count: u64,
     lookup_k: usize,
+    dp_max: usize,
+    label: &str,
+    n_samples: u64,
+    timeout_ms: u64,
+    seed: u64,
+) -> ComparisonReport {
+    compare_monte_carlo_with_config(
+        a,
+        min_count,
+        lookup_k,
+        &LookupConfig::default(),
+        dp_max,
+        label,
+        n_samples,
+        timeout_ms,
+        seed,
+    )
+}
+
+/// Like [`compare_monte_carlo`], but threads a [`LookupConfig`] into the lookup
+/// estimator (memory cap and `sat_per_bin` output-binning).
+#[allow(clippy::too_many_arguments)]
+pub fn compare_monte_carlo_with_config(
+    a: &[u64],
+    min_count: u64,
+    lookup_k: usize,
+    cfg: &LookupConfig,
     dp_max: usize,
     label: &str,
     n_samples: u64,
@@ -69,6 +97,7 @@ pub fn compare_monte_carlo(
         scale,
         min_count,
         lookup_k,
+        cfg,
         dp_max,
         label,
         CompareMode::MonteCarlo {

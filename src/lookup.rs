@@ -95,7 +95,7 @@ pub fn lookup_w(a: &[u64], e_target: u64, block_size: usize) -> Option<u128> {
 ///
 /// When `cfg.sat_per_bin > 1`, the sumset keys are quantized to
 /// `⌊sum / sat_per_bin⌋` after each block join and the returned count is the
-/// histogram bucket at `⌊e_target / sat_per_bin⌋` — i.e. the number of
+/// histogram bucket at `⌊e_target / sat_per_bin⌋`, i.e. the number of
 /// subsets whose sum lies in `[k·bin, (k+1)·bin)`, not point W(E).
 pub fn lookup_w_with_config(
     a: &[u64],
