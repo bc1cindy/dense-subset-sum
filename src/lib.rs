@@ -5,6 +5,7 @@
 
 pub mod dense_region;
 pub mod empirical_regime;
+pub mod estimator;
 pub mod fixtures;
 pub mod lookup;
 pub mod mappings;
@@ -28,5 +29,9 @@ pub use radix::{DISTINGUISHED, is_distinguished};
 pub use regime::{density_regime, kappa, kappa_c};
 pub use sasamoto::{log_w_for_e, log_w_for_e_sat, log_w_signed_sasamoto, n_c};
 pub use transaction::Transaction;
+
+/// One-sided Sasamoto threshold: below this |A|, the saddle approximation is
+/// unreliable and the lookup/DP path is authoritative.
+pub const SASAMOTO_MIN_N: usize = 20;
 
 mod transaction;
