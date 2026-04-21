@@ -25,6 +25,37 @@ pub fn log_w_for_e(a: &[f64], e_target: f64) -> Option<f64> {
     Some(log_w(a, beta))
 }
 
+/// Public entry (u64/satoshi): GCD-normalizes A and E, then calls (3.9).
+///
+/// Paper assumes gcd(A) = 1 (note after eq 3.6: otherwise extra saddles of
+/// equal order appear and (3.9) misses their contribution). Dividing A and E
+/// by gcd(A) restores the assumption on real inputs where it rarely holds
+/// (e.g. satoshi amounts in multiples of 1000). E not a multiple of gcd(A)
+/// has no solution → NEG_INFINITY. None if E ∉ (0, Σaⱼ) or A empty/all-zero.
+pub fn log_w_for_e_sat(a: &[u64], e_target: u64) -> Option<f64> {
+    if a.is_empty() {
+        return None;
+    }
+
+    let g = gcd_slice(a);
+    if g == 0 {
+        return None;
+    }
+
+    if !e_target.is_multiple_of(g) {
+        return Some(f64::NEG_INFINITY);
+    }
+
+    let a_norm: Vec<f64> = a.iter().map(|&v| (v / g) as f64).collect();
+    let e_norm = (e_target / g) as f64;
+
+    log_w_for_e(&a_norm, e_norm)
+}
+
+pub(crate) fn gcd_slice(vals: &[u64]) -> u64 {
+    vals.iter().copied().fold(0, gcd)
+}
+
 /// Solves (3.10) for β given target E: finds the saddle around which (3.9)
 /// is evaluated. Bisection works because ⟨E⟩(β) is strictly monotone (3.2).
 ///
@@ -99,6 +130,16 @@ fn variance_energy(a: &[f64], beta: f64) -> f64 {
             aj * aj / ((1.0 + x.exp()) * (1.0 + (-x).exp()))
         })
         .sum()
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    let (mut a, mut b) = (a, b);
+    while b != 0 {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    a
 }
 
 #[cfg(test)]
@@ -215,5 +256,72 @@ mod tests {
             err_20
         );
         assert!(err_20 < 0.05, "N=20 err={:.1}%, want <5%", err_20 * 100.0);
+    }
+
+    #[test]
+    fn test_gcd_normalization() {
+        let a_base: Vec<u64> = vec![3, 7, 11, 5, 9];
+        let a_scaled: Vec<u64> = a_base.iter().map(|&v| v * 100).collect();
+        let e_base: u64 = 15;
+        let e_scaled: u64 = 1500;
+
+        let lw_base = log_w_for_e_sat(&a_base, e_base).unwrap();
+        let lw_scaled = log_w_for_e_sat(&a_scaled, e_scaled).unwrap();
+        assert!(
+            (lw_base - lw_scaled).abs() < 1e-10,
+            "base={} scaled={}",
+            lw_base,
+            lw_scaled
+        );
+    }
+
+    #[test]
+    fn test_gcd_indivisible() {
+        let a: Vec<u64> = vec![10, 20, 30, 40];
+        let lw = log_w_for_e_sat(&a, 15).unwrap();
+        assert!(lw == f64::NEG_INFINITY, "expected -inf, got {}", lw);
+    }
+
+    #[test]
+    fn test_u64_vs_brute_force() {
+        let a: Vec<u64> = (1..=20).collect();
+        let n = a.len();
+        let e_max: u64 = a.iter().sum();
+
+        let mut w_exact = std::collections::HashMap::new();
+        for mask in 0..(1u64 << n) {
+            let sum: u64 = (0..n).filter(|&j| mask & (1 << j) != 0).map(|j| a[j]).sum();
+            *w_exact.entry(sum).or_insert(0u64) += 1;
+        }
+
+        let mut tested = 0;
+        for (&e, &w) in &w_exact {
+            if w < 100 || e == 0 || e >= e_max {
+                continue;
+            }
+            if let Some(lw) = log_w_for_e_sat(&a, e) {
+                let err = (lw.exp() - w as f64).abs() / w as f64;
+                assert!(
+                    err < 0.20,
+                    "E={}: exact={}, approx={:.1}, err={:.1}%",
+                    e,
+                    w,
+                    lw.exp(),
+                    err * 100.0
+                );
+                tested += 1;
+            }
+        }
+        assert!(tested > 20);
+    }
+
+    #[test]
+    fn test_log_w_for_e_sat_empty_returns_none() {
+        assert!(log_w_for_e_sat(&[], 10).is_none());
+    }
+
+    #[test]
+    fn test_log_w_for_e_sat_all_zeros_returns_none() {
+        assert!(log_w_for_e_sat(&[0, 0, 0], 0).is_none());
     }
 }
