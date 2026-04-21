@@ -6,9 +6,10 @@
 
 use crate::validation;
 use crate::{
-    SASAMOTO_MIN_N, SignedMethod, Transaction, arbitrary_distinctness_log2, best_radix_base,
-    coverage_bonus_log2, denomination_reward_log2, density_regime, distinguish_coins,
-    is_radix_like_any_base, kappa, log_dp_w, log_lookup_w, log_w_for_e_sat, log_w_signed,
+    EmpiricalRegime, SASAMOTO_MIN_N, SignedMethod, Transaction, arbitrary_distinctness_log2,
+    best_radix_base, coverage_bonus_log2, denomination_reward_log2, density_regime,
+    distinguish_coins, empirical_regime, is_radix_like_any_base, kappa, log_dp_w, log_lookup_w,
+    log_w_for_e_sat, log_w_signed, n_c,
 };
 
 #[derive(Debug, Clone)]
@@ -20,6 +21,10 @@ pub struct EstimatorConfig {
     pub exact_threshold: usize,
     /// DP skipped when Σa exceeds this. 10M ≈ a few hundred MB of u128.
     pub dp_max_table: usize,
+    /// Sasamoto saddle gate: trust the asymptotic only when `N_c(a)/N < saddle_tau`.
+    /// Calibrated against Wasabi2 fixtures: 0.5 keeps small-N/equal-denom batches out
+    /// while letting large, broad input sets through. See `empirical-nc` subcommand.
+    pub saddle_tau: f64,
 }
 
 impl Default for EstimatorConfig {
@@ -30,8 +35,22 @@ impl Default for EstimatorConfig {
             force_conservative: false,
             exact_threshold: 20,
             dp_max_table: 10_000_000,
+            saddle_tau: 0.5,
         }
     }
+}
+
+/// The Sasamoto saddle approximation is trustworthy only when `N ≫ N_c(a)`
+/// *and* the ensemble isn't pathologically narrow (equal-denomination inputs
+/// have κ_c = 0 at the midpoint per paper eq. 4.3).
+pub fn saddle_reliable(a: &[u64], tau: f64) -> bool {
+    if a.len() < SASAMOTO_MIN_N {
+        return false;
+    }
+    if matches!(empirical_regime(a), Some(EmpiricalRegime::EqualAmount)) {
+        return false;
+    }
+    n_c(a) / (a.len() as f64) < tau
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,15 +71,17 @@ impl EstimatorChoice {
     }
 }
 
-fn select_estimator(n: usize, use_radix: bool, config: &EstimatorConfig) -> EstimatorChoice {
-    if use_radix || config.force_conservative {
-        EstimatorChoice::Lookup
-    } else if n <= config.exact_threshold {
-        EstimatorChoice::ExactDp
-    } else if n < SASAMOTO_MIN_N {
-        EstimatorChoice::Lookup
-    } else {
+fn select_estimator(a: &[u64], config: &EstimatorConfig) -> EstimatorChoice {
+    if config.force_conservative {
+        return EstimatorChoice::Lookup;
+    }
+    if a.len() <= config.exact_threshold {
+        return EstimatorChoice::ExactDp;
+    }
+    if saddle_reliable(a, config.saddle_tau) {
         EstimatorChoice::SasamotoLookupMin
+    } else {
+        EstimatorChoice::Lookup
     }
 }
 
@@ -128,7 +149,7 @@ pub fn estimate_density(a: &[u64], e_target: u64, config: &EstimatorConfig) -> D
     }
 
     let use_radix = is_radix_like_any_base(a, config.radix_hw_threshold);
-    let choice = select_estimator(n, use_radix, config);
+    let choice = select_estimator(a, config);
 
     let (log_w, reliable) = match choice {
         EstimatorChoice::ExactDp => {
@@ -331,7 +352,7 @@ pub struct RegimeInfo {
 pub fn analyze_regime(tx: &Transaction, config: &EstimatorConfig) -> RegimeInfo {
     let k = kappa(&tx.inputs).unwrap_or(f64::NAN);
     let is_radix = is_radix_like_any_base(&tx.inputs, config.radix_hw_threshold);
-    let estimator = select_estimator(tx.inputs.len(), is_radix, config);
+    let estimator = select_estimator(&tx.inputs, config);
 
     let dense_at_quartile = {
         let l = *tx.inputs.iter().max().unwrap_or(&0);
@@ -377,28 +398,38 @@ mod tests {
     fn test_select_estimator_branches() {
         let mut cfg = EstimatorConfig::default();
 
-        assert_eq!(select_estimator(8, false, &cfg), EstimatorChoice::ExactDp);
-        assert_eq!(select_estimator(20, false, &cfg), EstimatorChoice::ExactDp);
+        let small: Vec<u64> = (1..=8).collect();
+        let edge: Vec<u64> = (1..=20).collect();
+        let broad: Vec<u64> = (1..=50).collect();
+        let equal = vec![1_000u64; 40];
+
+        assert_eq!(select_estimator(&small, &cfg), EstimatorChoice::ExactDp);
+        assert_eq!(select_estimator(&edge, &cfg), EstimatorChoice::ExactDp);
+
         cfg.exact_threshold = 10;
-        assert_eq!(select_estimator(15, false, &cfg), EstimatorChoice::Lookup);
+        let mid: Vec<u64> = (1..=15).collect();
+        assert_eq!(select_estimator(&mid, &cfg), EstimatorChoice::Lookup);
         assert_eq!(
-            select_estimator(50, false, &cfg),
+            select_estimator(&broad, &cfg),
             EstimatorChoice::SasamotoLookupMin
         );
-        assert_eq!(select_estimator(100, true, &cfg), EstimatorChoice::Lookup);
-
-        assert_eq!(
-            select_estimator(SASAMOTO_MIN_N, false, &cfg),
-            EstimatorChoice::SasamotoLookupMin,
-        );
-        assert_eq!(
-            select_estimator(SASAMOTO_MIN_N - 1, false, &cfg),
-            EstimatorChoice::Lookup,
-        );
+        // Equal-amount ⇒ saddle unreliable ⇒ Lookup even at large N.
+        assert_eq!(select_estimator(&equal, &cfg), EstimatorChoice::Lookup);
 
         cfg.force_conservative = true;
-        assert_eq!(select_estimator(8, false, &cfg), EstimatorChoice::Lookup);
-        assert_eq!(select_estimator(50, false, &cfg), EstimatorChoice::Lookup);
+        assert_eq!(select_estimator(&small, &cfg), EstimatorChoice::Lookup);
+        assert_eq!(select_estimator(&broad, &cfg), EstimatorChoice::Lookup);
+    }
+
+    #[test]
+    fn test_saddle_reliable_gate() {
+        let tau = 0.5;
+        // Below SASAMOTO_MIN_N: never reliable, regardless of N_c.
+        assert!(!saddle_reliable(&(1..=10).collect::<Vec<u64>>(), tau));
+        // Broad, large: N_c/N well below 0.5 ⇒ reliable.
+        assert!(saddle_reliable(&(1..=50).collect::<Vec<u64>>(), tau));
+        // Equal-amount at large N: structurally unreliable.
+        assert!(!saddle_reliable(&vec![1_000u64; 40], tau));
     }
 
     #[test]
@@ -562,14 +593,15 @@ mod tests {
     }
 
     #[test]
-    fn test_estimate_density_radix_path_dense() {
+    fn test_estimate_density_equal_denom_dense() {
         let a: Vec<u64> = vec![8; 10];
         let cfg = EstimatorConfig {
             radix_hw_threshold: 1,
             ..Default::default()
         };
         let de = estimate_density(&a, 40, &cfg);
-        assert_eq!(de.estimator_used, EstimatorChoice::Lookup);
+        // N ≤ exact_threshold ⇒ ExactDp (strictly tighter than the old Lookup path).
+        assert_eq!(de.estimator_used, EstimatorChoice::ExactDp);
         assert_eq!(de.regime, Regime::Dense);
         assert!(de.reliable);
         assert!(de.log_w.unwrap() > 0.0);
