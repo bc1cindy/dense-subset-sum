@@ -239,4 +239,31 @@ mod tests {
         assert!(!report.rows.is_empty() || report.n <= 4);
     }
 
+    #[test]
+    fn test_wasabi2_cja_mappings() {
+        use crate::{fixtures, validation};
+
+        let lookup_k = 10;
+        let max_coins = 26;
+        let mut comparisons = Vec::new();
+
+        for (label, tx) in fixtures::all_wasabi2_false_cjtxs() {
+            match validation::compare_w_vs_mappings(&tx, label, lookup_k, max_coins) {
+                Some(mc) => {
+                    validation::print_mapping_comparison(&mc);
+                    comparisons.push(mc);
+                }
+                None => {
+                    let total = tx.inputs.len() + tx.outputs.len() + 1;
+                    eprintln!("  SKIP {} ({} coins > {})", label, total, max_coins);
+                }
+            }
+        }
+
+        if !comparisons.is_empty() {
+            validation::print_mapping_summary(&comparisons);
+        }
+
+        assert!(!comparisons.is_empty(), "no txs small enough for CJA");
+    }
 }
