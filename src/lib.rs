@@ -3,6 +3,8 @@
 //! W(E) = number of input subsets that sum to E. Provides exact (DP),
 //! lookup lower-bound, and Sasamoto asymptotic estimators.
 
+pub mod stats;
+
 pub use transaction::Transaction;
 
 mod transaction;
