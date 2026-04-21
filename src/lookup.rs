@@ -3,11 +3,57 @@
 //! [`brute_force_w_restricted`] as test oracles. `Truncated` variants are lower
 //! bounds returned when `max_entries` is reached or `u128` overflows. W(M, E) mirrors W(E) in
 //! API shape; only W(E) has a dense variant, since `(m, sum)` cells scale as
-//! `O((N+1)·sum)`.
+//! `O((N+1)·sum)`. [`log_lookup_w_signed`] handles ΣS − ΣT = target.
 
 use std::collections::{HashMap, hash_map};
 
-use crate::sasamoto::gcd_slice;
+use crate::sasamoto::{gcd_slice, log_w_signed_sasamoto};
+
+/// Explicit method choice for signed probes. Pure routing; callers compose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignedMethod {
+    /// Asymptotic estimate (O(N)). Fast; unreliable for small N or low density.
+    Sasamoto,
+    /// Sumset-based lookup. Exact when both sumsets fit; lower bound otherwise.
+    Lookup,
+}
+
+/// Routes a signed probe to one of the two primitives based on `method`.
+/// Uses `LookupConfig::default()`; see [`log_w_signed_with_config`] for an explicit cap.
+pub fn log_w_signed(
+    positives: &[u64],
+    negatives: &[u64],
+    target: i64,
+    method: SignedMethod,
+) -> Option<f64> {
+    log_w_signed_with_config(
+        positives,
+        negatives,
+        target,
+        &LookupConfig::default(),
+        method,
+    )
+}
+
+/// Like [`log_w_signed`], with an explicit memory budget. The cap is ignored
+/// when `method == SignedMethod::Sasamoto`.
+pub fn log_w_signed_with_config(
+    positives: &[u64],
+    negatives: &[u64],
+    target: i64,
+    cfg: &LookupConfig,
+    method: SignedMethod,
+) -> Option<f64> {
+    match method {
+        SignedMethod::Sasamoto => {
+            log_w_signed_sasamoto(positives, negatives, target).filter(|v| v.is_finite())
+        }
+        SignedMethod::Lookup => {
+            log_lookup_w_signed_with_config(positives, negatives, target, cfg)
+                .filter(|v| v.is_finite())
+        }
+    }
+}
 
 /// Default memory budget: 2^26 entries ≈ 2GB.
 pub const DEFAULT_MAX_ENTRIES: usize = 67_108_864;
@@ -383,6 +429,35 @@ pub fn log_lookup_w(set: &[u64], e_target: u64) -> Option<f64> {
 
 pub fn log_lookup_w_with_config(set: &[u64], e_target: u64, cfg: &LookupConfig) -> Option<f64> {
     Some(log_count(lookup_w_with_config(set, e_target, cfg)?))
+}
+
+/// log #pairs (S ⊆ positives, T ⊆ negatives) with ΣS − ΣT = target.
+/// CoinJoin convention: positives=outputs, negatives=inputs. Lower bound when
+/// either sumset is `Truncated`.
+pub fn log_lookup_w_signed(positives: &[u64], negatives: &[u64], target: i64) -> Option<f64> {
+    log_lookup_w_signed_with_config(positives, negatives, target, &LookupConfig::default())
+}
+
+/// Like [`log_lookup_w_signed`], with an explicit memory budget.
+pub fn log_lookup_w_signed_with_config(
+    positives: &[u64],
+    negatives: &[u64],
+    target: i64,
+    cfg: &LookupConfig,
+) -> Option<f64> {
+    let pos = sumset(positives, cfg);
+    let neg = sumset(negatives, cfg);
+
+    let mut total: u128 = 0;
+    for (s_pos, c_pos) in pos.iter() {
+        let s_neg_required = (s_pos as i64).checked_sub(target)?;
+        if s_neg_required < 0 {
+            continue;
+        }
+        let c_neg = neg.get(s_neg_required as u64);
+        total = total.saturating_add(c_pos.saturating_mul(c_neg));
+    }
+    Some(log_count(total))
 }
 
 /// Recursive divide-and-conquer over the multiset.
@@ -1596,5 +1671,71 @@ mod tests {
             let brute = brute_force_w_restricted(&set, m, e).unwrap();
             prop_assert!(lookup <= brute);
         }
+    }
+
+    fn brute_signed(pos: &[u64], neg: &[u64], target: i64) -> u128 {
+        let mut total = 0u128;
+        let np = pos.len();
+        let nn = neg.len();
+        for sp in 0u32..(1 << np) {
+            let ss: i64 = (0..np)
+                .filter(|i| (sp >> i) & 1 == 1)
+                .map(|i| pos[i] as i64)
+                .sum();
+            for sn in 0u32..(1 << nn) {
+                let sn_sum: i64 = (0..nn)
+                    .filter(|j| (sn >> j) & 1 == 1)
+                    .map(|j| neg[j] as i64)
+                    .sum();
+                if ss - sn_sum == target {
+                    total += 1;
+                }
+            }
+        }
+        total
+    }
+
+    #[test]
+    fn test_lookup_w_signed_vs_brute() {
+        let pos: Vec<u64> = vec![1, 2, 3];
+        let neg: Vec<u64> = vec![1, 2];
+        for target in -3..=6 {
+            let brute = brute_signed(&pos, &neg, target);
+            let lw = log_lookup_w_signed(&pos, &neg, target).unwrap();
+            let lookup: u128 = if lw.is_finite() {
+                lw.exp().round() as u128
+            } else {
+                0
+            };
+            assert_eq!(
+                brute, lookup,
+                "target={}: brute={} lookup={}",
+                target, brute, lookup
+            );
+        }
+    }
+
+    #[test]
+    fn test_lookup_w_signed_target_zero_has_empty_pair() {
+        let pos: Vec<u64> = vec![5, 7];
+        let neg: Vec<u64> = vec![3, 11];
+        let lw = log_lookup_w_signed(&pos, &neg, 0).unwrap();
+        assert!(lw.is_finite(), "expected at least the empty pair, got {}", lw);
+    }
+
+    #[test]
+    fn test_log_lookup_w_signed_zero_count_is_neg_inf() {
+        let pos: Vec<u64> = vec![1, 2];
+        let neg: Vec<u64> = vec![4];
+        let lw = log_lookup_w_signed(&pos, &neg, -100).unwrap();
+        assert!(lw.is_infinite() && lw.is_sign_negative(), "got {}", lw);
+    }
+
+    #[test]
+    fn test_lookup_w_signed_balanced_nonneg() {
+        let pos: Vec<u64> = vec![10, 20, 30];
+        let neg: Vec<u64> = vec![10, 20, 30];
+        let lw = log_lookup_w_signed(&pos, &neg, 0).unwrap();
+        assert!(lw.is_finite(), "balanced multisets should have W >= 1");
     }
 }
