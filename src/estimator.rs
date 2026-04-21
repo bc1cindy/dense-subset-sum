@@ -67,20 +67,6 @@ impl EstimatorChoice {
     }
 }
 
-fn select_estimator(a: &[u64], config: &EstimatorConfig) -> EstimatorChoice {
-    if config.force_conservative {
-        return EstimatorChoice::Lookup;
-    }
-    if a.len() <= config.exact_threshold {
-        return EstimatorChoice::ExactDp;
-    }
-    if saddle_reliable(a, config.saddle_tau) {
-        EstimatorChoice::SasamotoLookupMin
-    } else {
-        EstimatorChoice::Lookup
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Regime {
     Dense,
@@ -285,25 +271,6 @@ pub fn compare_augmented(
     (mean_before, mean_after, delta)
 }
 
-/// Mean log₂ W_signed over all coins. 0 for degenerate txs.
-fn tx_mean_signed(tx: &Transaction, config: &EstimatorConfig, method: SignedMethod) -> f64 {
-    let total_coins = tx.inputs.len() + tx.outputs.len();
-    if total_coins < 2 {
-        return 0.0;
-    }
-    let measurements = validation::per_coin_measurements_fee_aware(tx, config.lookup_k, method);
-    let ln2 = std::f64::consts::LN_2;
-    let reachable: Vec<f64> = measurements
-        .iter()
-        .filter_map(|c| c.log_w_signed)
-        .map(|v| v / ln2)
-        .collect();
-    if reachable.is_empty() {
-        return 0.0;
-    }
-    reachable.iter().sum::<f64>() / reachable.len() as f64
-}
-
 #[derive(Debug, Clone)]
 pub struct RegimeInfo {
     pub kappa: f64,
@@ -333,6 +300,39 @@ pub fn analyze_regime(tx: &Transaction, config: &EstimatorConfig) -> RegimeInfo 
         estimator,
         dense_at_quartile,
     }
+}
+
+fn select_estimator(a: &[u64], config: &EstimatorConfig) -> EstimatorChoice {
+    if config.force_conservative {
+        return EstimatorChoice::Lookup;
+    }
+    if a.len() <= config.exact_threshold {
+        return EstimatorChoice::ExactDp;
+    }
+    if saddle_reliable(a, config.saddle_tau) {
+        EstimatorChoice::SasamotoLookupMin
+    } else {
+        EstimatorChoice::Lookup
+    }
+}
+
+/// Mean log₂ W_signed over all coins. 0 for degenerate txs.
+fn tx_mean_signed(tx: &Transaction, config: &EstimatorConfig, method: SignedMethod) -> f64 {
+    let total_coins = tx.inputs.len() + tx.outputs.len();
+    if total_coins < 2 {
+        return 0.0;
+    }
+    let measurements = validation::per_coin_measurements_fee_aware(tx, config.lookup_k, method);
+    let ln2 = std::f64::consts::LN_2;
+    let reachable: Vec<f64> = measurements
+        .iter()
+        .filter_map(|c| c.log_w_signed)
+        .map(|v| v / ln2)
+        .collect();
+    if reachable.is_empty() {
+        return 0.0;
+    }
+    reachable.iter().sum::<f64>() / reachable.len() as f64
 }
 
 #[cfg(test)]
