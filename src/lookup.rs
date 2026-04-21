@@ -1,4 +1,4 @@
-//! Exact W(E): brute-force oracle and 0/1 DP for the W(E) tier stack.        
+//! Exact W(E): brute-force oracle and 0/1 DP for the W(E) tier stack.
 
 use crate::sasamoto::gcd_slice;
 
@@ -25,8 +25,7 @@ pub fn brute_force_w(original_set: &[u64], e_target: u64) -> Option<u128> {
     Some(count)
 }
 
-/// Subset-sum DP. `None` for degenerate A, Σa overflow, or table over
-/// `max_cells`; `Some(0)` for unreachable E.
+/// Subset-sum DP.
 pub fn dp_w(original_set: &[u64], e_target: u64, max_cells: usize) -> Option<u128> {
     let NormalizedDp {
         normalized,
@@ -108,6 +107,66 @@ fn normalize_for_dp(set: &[u64], e: u64) -> DpInput {
         e_norm,
         sum_max,
     })
+}
+
+/// Subset-sum DP restricted to size exactly `m`. Same returns as [`dp_w`].
+pub fn dp_w_restricted(
+    original_set: &[u64],
+    m: usize,
+    e_target: u64,
+    max_cells: usize,
+) -> Option<u128> {
+    if m > original_set.len() {
+        return Some(0);
+    }
+    if m == 0 {
+        return Some(u128::from(e_target == 0));
+    }
+
+    let NormalizedDp {
+        normalized,
+        e_norm,
+        sum_max,
+    } = match normalize_for_dp(original_set, e_target) {
+        DpInput::Ready(input) => input,
+        DpInput::EarlyZero => return Some(0),
+        DpInput::Degenerate => return None,
+    };
+
+    let sz = usize::try_from(sum_max).ok()?.checked_add(1)?;
+    let dp_rows = m + 1;
+    let cells = dp_rows.checked_mul(sz)?;
+    if cells > max_cells {
+        return None;
+    }
+
+    let mut dp = vec![vec![0u128; sz]; dp_rows];
+    dp[0][0] = 1;
+
+    for &val in &normalized {
+        let v = val as usize;
+        for mm in (1..=m).rev() {
+            for j in (v..sz).rev() {
+                dp[mm][j] += dp[mm - 1][j - v];
+            }
+        }
+    }
+
+    Some(dp[m][e_norm as usize])
+}
+
+pub fn log_dp_w_restricted(
+    original_set: &[u64],
+    m: usize,
+    e_target: u64,
+    max_cells: usize,
+) -> Option<f64> {
+    Some(log_count(dp_w_restricted(
+        original_set,
+        m,
+        e_target,
+        max_cells,
+    )?))
 }
 
 #[cfg(test)]
@@ -240,6 +299,124 @@ mod tests {
             let scaled: Vec<u64> = set.iter().map(|&v| v * c).collect();
             let base = dp_w(&set, e, 1_000_000).unwrap();
             let scaled_w = dp_w(&scaled, e * c, 1_000_000).unwrap();
+            prop_assert_eq!(base, scaled_w);
+        }
+    }
+
+    fn brute_force_w_restricted(a: &[u64], m: usize, e: u64) -> u128 {
+        let n = a.len();
+        let mut count = 0u128;
+        for mask in 0..(1u64 << n) {
+            if mask.count_ones() as usize != m {
+                continue;
+            }
+            let sum: u64 = (0..n).filter(|&j| mask & (1 << j) != 0).map(|j| a[j]).sum();
+            if sum == e {
+                count += 1;
+            }
+        }
+        count
+    }
+
+    #[test]
+    fn test_dp_restricted_matches_brute_force() {
+        let a: Vec<u64> = vec![3, 7, 11, 5, 9, 2, 4];
+        let sum: u64 = a.iter().sum();
+        for m in 0..=a.len() {
+            for e in 0..=sum {
+                let brute = brute_force_w_restricted(&a, m, e);
+                let dp = dp_w_restricted(&a, m, e, 1_000_000).unwrap();
+                assert_eq!(dp, brute, "m={}, e={}: brute={}, dp={}", m, e, brute, dp);
+            }
+        }
+    }
+
+    #[test]
+    fn test_dp_restricted_sum_over_m_matches_dp_w() {
+        // Σ_{m=0..=N} W(m, E) must equal W(E).
+        let a: Vec<u64> = (1..=12).collect();
+        let sum: u64 = a.iter().sum();
+        for e in [0, 1, 10, sum / 2, sum - 1, sum] {
+            let w_total = dp_w(&a, e, 1_000_000).unwrap();
+            let w_sum: u128 = (0..=a.len())
+                .map(|m| dp_w_restricted(&a, m, e, 1_000_000).unwrap())
+                .sum();
+            assert_eq!(
+                w_sum, w_total,
+                "e={}: Σ_m W(m,e)={}, W(e)={}",
+                e, w_sum, w_total
+            );
+        }
+    }
+
+    #[test]
+    fn test_dp_restricted_edges() {
+        let a: Vec<u64> = vec![5, 10, 15];
+        assert_eq!(dp_w_restricted(&a, 0, 0, 1_000_000), Some(1));
+        assert_eq!(dp_w_restricted(&a, 0, 5, 1_000_000), Some(0));
+        assert_eq!(dp_w_restricted(&a, 4, 10, 1_000_000), Some(0));
+        assert_eq!(dp_w_restricted(&[], 0, 0, 1_000_000), Some(1));
+        assert_eq!(dp_w_restricted(&[], 1, 0, 1_000_000), Some(0));
+    }
+
+    #[test]
+    fn test_dp_restricted_gcd() {
+        let a: Vec<u64> = vec![10, 20, 30, 40];
+        assert_eq!(
+            dp_w_restricted(&a, 2, 30, 1_000_000),
+            Some(brute_force_w_restricted(&a, 2, 30))
+        );
+        assert_eq!(dp_w_restricted(&a, 2, 15, 1_000_000), Some(0));
+    }
+
+    #[test]
+    fn test_dp_restricted_too_large() {
+        let a: Vec<u64> = vec![1, 2, 3];
+        assert!(dp_w_restricted(&a, 2, 3, 2).is_none());
+    }
+
+    #[test]
+    fn test_dp_w_restricted_sum_overflow_is_none() {
+        let a: Vec<u64> = vec![u64::MAX, 1];
+        assert!(dp_w_restricted(&a, 1, 0, 1_000_000_000).is_none());
+    }
+
+    #[test]
+    fn test_log_dp_w_restricted_zero_count_is_neg_inf() {
+        let a: Vec<u64> = vec![5, 10, 15];
+        let lw = log_dp_w_restricted(&a, 2, 3, 1_000_000).unwrap();
+        assert!(lw.is_infinite() && lw.is_sign_negative());
+    }
+
+    #[test]
+    fn test_log_dp_w_restricted_finite_for_positive_count() {
+        let a: Vec<u64> = vec![1, 2, 3, 4];
+        let lw = log_dp_w_restricted(&a, 2, 5, 1_000_000).unwrap();
+        assert!(lw.is_finite() && lw >= 0.0);
+    }
+
+    proptest! {
+        #[test]
+        fn proptest_dp_restricted_matches_brute_force(
+            set in prop::collection::vec(1u64..=10, 1..=6),
+            m in 0usize..=6,
+            e in 0u64..=60,
+        ) {
+            let dp = dp_w_restricted(&set, m, e, 1_000_000).unwrap();
+            let brute = brute_force_w_restricted(&set, m, e);
+            prop_assert_eq!(dp, brute);
+        }
+
+        #[test]
+        fn proptest_dp_restricted_gcd_scale_invariant(
+            set in prop::collection::vec(1u64..=10, 1..=6),
+            m in 0usize..=6,
+            c in 1u64..=10,
+            e in 0u64..=60,
+        ) {
+            let scaled: Vec<u64> = set.iter().map(|&v| v * c).collect();
+            let base = dp_w_restricted(&set, m, e, 1_000_000).unwrap();
+            let scaled_w = dp_w_restricted(&scaled, m, e * c, 1_000_000).unwrap();
             prop_assert_eq!(base, scaled_w);
         }
     }
