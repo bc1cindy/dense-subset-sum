@@ -386,9 +386,18 @@ mod tests {
         let exact = Sumset::powerset(&[3, 5]);
         let bounded = Sumset::bounded(&[1, 2, 3, 4], 2);
         assert_eq!(Sumset::convolve(&exact, &exact).bound(), Bound::Exact);
-        assert_eq!(Sumset::convolve(&exact, &bounded).bound(), Bound::LowerBound);
-        assert_eq!(Sumset::convolve(&bounded, &exact).bound(), Bound::LowerBound);
-        assert_eq!(Sumset::convolve(&bounded, &bounded).bound(), Bound::LowerBound);
+        assert_eq!(
+            Sumset::convolve(&exact, &bounded).bound(),
+            Bound::LowerBound
+        );
+        assert_eq!(
+            Sumset::convolve(&bounded, &exact).bound(),
+            Bound::LowerBound
+        );
+        assert_eq!(
+            Sumset::convolve(&bounded, &bounded).bound(),
+            Bound::LowerBound
+        );
     }
 
     #[test]
