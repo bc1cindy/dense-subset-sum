@@ -25,8 +25,8 @@ pub use lookup::{
     log_w_signed_with_config, lookup_w, lookup_w_with_config,
 };
 pub use radix::{
-    RADIX_BASES, arbitrary_distinctness_log2, best_radix_base, coverage_bonus_log2,
-    denomination_multiplicities, denomination_reward_log2, distinguish_coins,
+    DISTINGUISHED, RADIX_BASES, arbitrary_distinctness_log2, best_radix_base, coverage_bonus_log2,
+    denomination_multiplicities, denomination_reward_log2, distinguish_coins, is_distinguished,
     is_radix_like_any_base, is_radix_like_in_base,
 };
 pub use regime::{density_regime, kappa, kappa_c};
