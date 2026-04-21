@@ -2,9 +2,51 @@
 //!
 //! - [`brute_force_w`]: exact, N ≲ 25.
 //! - [`dp_w`]: exact DP, bails past `max_table_size`.
+//! - [`lookup_w`]: block-convolution lower bound, scales via [`LookupConfig`].
+
+use std::collections::HashMap;
 
 use crate::sasamoto::gcd_slice;
 
+/// 2^22 ≈ 4M entries fits in ~100MB; unbounded N≥20 with sat-scale values hits 10^9 entries (OOM).
+pub const DEFAULT_MAX_ENTRIES: usize = 4_194_304;
+
+/// Maximum sumset during block convolution. Both `max_memory_bytes` and
+/// `max_entries` are exposed so callers can reason about whichever resource is
+/// scarce; use `from_memory_bytes` or `from_max_entries` to keep them consistent.
+/// `Default` reproduces 2^22-entry max (~100MB nominal).
+#[derive(Debug, Clone)]
+pub struct LookupConfig {
+    pub max_memory_bytes: usize,
+    pub max_entries: usize,
+}
+
+impl Default for LookupConfig {
+    fn default() -> Self {
+        Self {
+            max_memory_bytes: DEFAULT_MAX_ENTRIES * ENTRY_SIZE_BYTES,
+            max_entries: DEFAULT_MAX_ENTRIES,
+        }
+    }
+}
+
+impl LookupConfig {
+    pub fn from_memory_bytes(bytes: usize) -> Self {
+        Self {
+            max_memory_bytes: bytes,
+            max_entries: bytes / ENTRY_SIZE_BYTES,
+        }
+    }
+
+    pub fn from_max_entries(n: usize) -> Self {
+        Self {
+            max_memory_bytes: n * ENTRY_SIZE_BYTES,
+            max_entries: n,
+        }
+    }
+}
+
+/// Exact W(E) by enumerating 2^N subsets. Max N ≈ 25 in practice.
 pub fn brute_force_w(original_set: &[u64], e_target: u64) -> u64 {
     let n = original_set.len();
     assert!(n <= 30, "brute_force_w: N={} too large (max 30)", n);
@@ -21,6 +63,67 @@ pub fn brute_force_w(original_set: &[u64], e_target: u64) -> u64 {
     count
 }
 
+/// Block-convolution lower bound on W(E). k=N: exact; k=1: loose; k=15..20: practical sweet spot.
+///
+/// Returns `u128` because `W > 2^64` is reachable for N ≥ 64. Callers that cast
+/// to `f64` lose precision above 2^53 (f64 mantissa); that's acceptable for
+/// ratios/error reports but not for equality checks on large W.
+pub fn lookup_w(original_set: &[u64], e_target: u64, block_size: usize) -> Option<u128> {
+    lookup_w_with_config(original_set, e_target, block_size, &LookupConfig::default())
+}
+
+/// Like `lookup_w`, but with an explicit memory/entry max.
+pub fn lookup_w_with_config(
+    original_set: &[u64],
+    e_target: u64,
+    block_size: usize,
+    cfg: &LookupConfig,
+) -> Option<u128> {
+    if original_set.is_empty() {
+        return None;
+    }
+    let combined = full_sumset(original_set, block_size, cfg.max_entries);
+    Some(*combined.get(&e_target).unwrap_or(&0))
+}
+
+pub fn log_lookup_w(original_set: &[u64], e_target: u64, block_size: usize) -> Option<f64> {
+    log_lookup_w_with_config(original_set, e_target, block_size, &LookupConfig::default())
+}
+
+/// Distinct reachable sums |{ΣS : S ⊆ A}|, bounded by `cfg.max_entries`.
+/// Conservative under the cap: the bound is a sub-sumset, so the true size
+/// may be larger when this returns `cfg.max_entries`.
+pub fn sumset_size_with_config(
+    original_set: &[u64],
+    block_size: usize,
+    cfg: &LookupConfig,
+) -> usize {
+    full_sumset(original_set, block_size, cfg.max_entries).len()
+}
+
+/// Like `log_lookup_w`, but with an explicit memory/entry max.
+pub fn log_lookup_w_with_config(
+    original_set: &[u64],
+    e_target: u64,
+    block_size: usize,
+    cfg: &LookupConfig,
+) -> Option<f64> {
+    let w = lookup_w_with_config(original_set, e_target, block_size, cfg)?;
+    if w == 0 {
+        Some(f64::NEG_INFINITY)
+    } else {
+        Some((w as f64).ln())
+    }
+}
+
+/// Exact W(E) via DP: O(N · sum_max). `None` when sum_max exceeds `max_table_size`.
+///
+/// `original_set` is the input multiset (values to choose subsets of), not a
+/// precomputed sumset. Exact alternative to [`lookup_w`], kept for cross-validation —
+/// the two methods converge on the same count via different paths.
+///
+/// Returns `u128` to represent the exact count up to 2^N. Casting to `f64`
+/// loses precision above 2^53; fine for error ratios, not for equality.
 pub fn dp_w(original_set: &[u64], e_target: u64, max_table_size: usize) -> Option<u128> {
     if original_set.is_empty() {
         return None;
@@ -137,10 +240,179 @@ pub fn log_dp_w_restricted(
     }
 }
 
+/// Exact sumset of a small block: HashMap<sum, count> over all 2^n subsets.
+fn block_sumset(block: &[u64]) -> HashMap<u64, u128> {
+    let n = block.len();
+    let mut counts: HashMap<u64, u128> = HashMap::new();
+    for mask in 0..(1u64 << n) {
+        let sum: u64 = (0..n)
+            .filter(|&j| mask & (1 << j) != 0)
+            .map(|j| block[j])
+            .sum();
+        *counts.entry(sum).or_insert(0) += 1;
+    }
+    counts
+}
+
+/// Minkowski convolution; bails at `max_entries` — result is a sub-sumset, still a lower bound on W.
+fn convolve_capped(
+    a: &HashMap<u64, u128>,
+    b: &HashMap<u64, u128>,
+    max_entries: usize,
+) -> HashMap<u64, u128> {
+    let mut result: HashMap<u64, u128> = HashMap::new();
+    for (&s1, &c1) in a {
+        for (&s2, &c2) in b {
+            *result.entry(s1 + s2).or_insert(0) += c1 * c2;
+        }
+        if result.len() >= max_entries {
+            break;
+        }
+    }
+    result
+}
+
+fn convolve(
+    a: &HashMap<u64, u128>,
+    b: &HashMap<u64, u128>,
+    max_entries: usize,
+) -> HashMap<u64, u128> {
+    convolve_capped(a, b, max_entries)
+}
+
+/// Block-convolved sumset. Over `max_entries`, remaining blocks fold naively as {0, v_i} — still a valid W lower bound.
+fn full_sumset(original_set: &[u64], block_size: usize, max_entries: usize) -> HashMap<u64, u128> {
+    if original_set.is_empty() {
+        let mut m = HashMap::new();
+        m.insert(0u64, 1u128);
+        return m;
+    }
+    let k = block_size.max(1).min(original_set.len());
+    let blocks: Vec<&[u64]> = original_set.chunks(k).collect();
+    let mut combined = block_sumset(blocks[0]);
+    for block in &blocks[1..] {
+        let block_sums = if combined.len() >= max_entries {
+            let mut coarse = HashMap::new();
+            coarse.insert(0u64, 1u128);
+            for &v in *block {
+                let mut next = coarse.clone();
+                for (&s, &c) in &coarse {
+                    *next.entry(s + v).or_insert(0) += c;
+                }
+                coarse = next;
+                if coarse.len() >= max_entries {
+                    break;
+                }
+            }
+            coarse
+        } else {
+            block_sumset(block)
+        };
+        combined = convolve(&combined, &block_sums, max_entries);
+        if combined.len() >= max_entries {
+            break;
+        }
+    }
+    combined
+}
+
+/// Nominal per-entry size: `u64` sum + `u128` count. Real `HashMap` has bucket
+/// overhead on top, so this is a lower bound used to convert between the two
+/// knobs; pick a memory budget conservatively.
+const ENTRY_SIZE_BYTES: usize = std::mem::size_of::<(u64, u128)>();
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+
+    #[test]
+    fn test_lookup_config_default_matches_historical_max() {
+        let cfg = LookupConfig::default();
+        assert_eq!(cfg.max_entries, DEFAULT_MAX_ENTRIES);
+        assert_eq!(cfg.max_memory_bytes, DEFAULT_MAX_ENTRIES * ENTRY_SIZE_BYTES);
+    }
+
+    #[test]
+    fn test_lookup_config_constructors_round_trip() {
+        let from_mem = LookupConfig::from_memory_bytes(1_000_000);
+        assert_eq!(from_mem.max_memory_bytes, 1_000_000);
+        assert_eq!(from_mem.max_entries, 1_000_000 / ENTRY_SIZE_BYTES);
+
+        let from_entries = LookupConfig::from_max_entries(1000);
+        assert_eq!(from_entries.max_entries, 1000);
+        assert_eq!(from_entries.max_memory_bytes, 1000 * ENTRY_SIZE_BYTES);
+    }
+
+    #[test]
+    fn test_lookup_config_smaller_cap_is_looser_lower_bound() {
+        let a: Vec<u64> = (1..=20).collect();
+        let e = a.iter().sum::<u64>() / 2;
+
+        let tight = LookupConfig::from_max_entries(64);
+        let w_tight = lookup_w_with_config(&a, e, 4, &tight).unwrap();
+        let w_default = lookup_w_with_config(&a, e, 4, &LookupConfig::default()).unwrap();
+        let exact = brute_force_w(&a, e) as u128;
+
+        assert!(
+            w_tight <= w_default,
+            "tighter cap must produce ≤ W: tight={}, default={}",
+            w_tight,
+            w_default
+        );
+        assert!(
+            w_default <= exact,
+            "lookup must remain a lower bound: default={}, exact={}",
+            w_default,
+            exact
+        );
+    }
+
+    #[test]
+    fn test_lookup_exact_when_k_equals_n() {
+        let a: Vec<u64> = (1..=16).collect();
+        let n = a.len();
+
+        for e in 1..a.iter().sum() {
+            let exact = brute_force_w(&a, e);
+            let lookup = lookup_w(&a, e, n).unwrap();
+            assert_eq!(
+                lookup, exact as u128,
+                "E={}: brute={}, lookup={}",
+                e, exact, lookup
+            );
+        }
+    }
+
+    #[test]
+    fn test_lookup_is_lower_bound() {
+        let a: Vec<u64> = (1..=20).collect();
+        let e_mid: u64 = a.iter().sum::<u64>() / 2;
+        let exact = brute_force_w(&a, e_mid);
+
+        for k in &[1, 3, 5, 10, 15, 20] {
+            let lb = lookup_w(&a, e_mid, *k).unwrap();
+            assert!(
+                lb <= exact as u128,
+                "k={}: lookup={} > exact={}",
+                k,
+                lb,
+                exact
+            );
+        }
+    }
+
+    #[test]
+    fn test_lookup_monotone_in_k() {
+        let a: Vec<u64> = (1..=16).collect();
+        let e_mid: u64 = a.iter().sum::<u64>() / 2;
+
+        let mut prev = 0u128;
+        for k in 1..=a.len() {
+            let w = lookup_w(&a, e_mid, k).unwrap();
+            assert!(w >= prev, "k={}: {} < prev {}", k, w, prev);
+            prev = w;
+        }
+    }
 
     #[test]
     fn test_brute_force_w_u64() {
