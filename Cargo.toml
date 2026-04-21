@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 coinjoin_analyzer = { git = "https://github.com/payjoin/cja", rev = "48ad16c13a05d902933638ee77b6b53a4da3de95" }
+rand = { version = "0.8", features = ["std_rng"] }
