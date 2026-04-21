@@ -5,9 +5,9 @@ use clap::{Parser, Subcommand};
 use crate::commands::{
     TxSpec, cmd_analyze_tx, cmd_coin_measures, cmd_compare, cmd_compare_augmented,
     cmd_compare_fixtures, cmd_compare_random, cmd_compare_synthetic, cmd_compare_wasabi2,
-    cmd_correlate_estimators, cmd_dense_boundary, cmd_density, cmd_density_scan,
-    cmd_empirical_nc, cmd_estimate, cmd_full_report, cmd_kappa, cmd_measure, cmd_subset_density,
-    cmd_suggest_split, cmd_validate,
+    cmd_correlate_estimators, cmd_dense_boundary, cmd_density, cmd_density_scan, cmd_empirical_nc,
+    cmd_estimate, cmd_full_report, cmd_kappa, cmd_measure, cmd_subset_density, cmd_suggest_split,
+    cmd_validate,
 };
 
 #[derive(Parser)]
@@ -19,6 +19,188 @@ use crate::commands::{
 pub struct Cli {
     #[command(subcommand)]
     command: Command,
+}
+
+pub fn run(cli: Cli) {
+    match cli.command {
+        Command::DensityScan {
+            values,
+            steps,
+            min_log_w,
+        } => cmd_density_scan(&values, steps, min_log_w),
+        Command::AnalyzeTx { inputs, outputs } => cmd_analyze_tx(&inputs, &outputs),
+        Command::Estimate {
+            inputs,
+            outputs,
+            block_size,
+        } => cmd_estimate(&inputs, &outputs, block_size),
+        Command::Validate {
+            values,
+            min_w,
+            block_size,
+        } => cmd_validate(&values, min_w, block_size),
+        Command::Kappa { values, target } => cmd_kappa(&values, target),
+        Command::Measure {
+            inputs,
+            outputs,
+            block_size,
+        } => cmd_measure(&inputs, &outputs, block_size),
+        Command::Compare {
+            values,
+            min_w,
+            block_size,
+            csv,
+        } => cmd_compare(&values, min_w, block_size, csv),
+        Command::CompareFixtures { min_w, block_size } => cmd_compare_fixtures(min_w, block_size),
+        Command::CompareRandom {
+            n,
+            max_val,
+            seed,
+            min_w,
+            block_size,
+            matrix,
+        } => cmd_compare_random(n, max_val, seed, min_w, block_size, matrix),
+        Command::CompareWasabi2 {
+            max_coins,
+            block_size,
+            fee_handling,
+            signed_method,
+        } => cmd_compare_wasabi2(max_coins, block_size, &fee_handling, &signed_method),
+        Command::CoinMeasures {
+            tx_label,
+            tx_json,
+            inputs,
+            outputs,
+            block_size,
+            signed_method,
+        } => cmd_coin_measures(
+            &TxSpec {
+                label: tx_label.as_deref(),
+                json: tx_json.as_deref(),
+                inputs_str: &inputs,
+                outputs_str: &outputs,
+            },
+            block_size,
+            &signed_method,
+        ),
+        Command::SubsetDensity {
+            tx_label,
+            tx_json,
+            values,
+            all_coins,
+            sizes,
+            samples,
+            seed,
+        } => cmd_subset_density(
+            tx_label.as_deref(),
+            tx_json.as_deref(),
+            &values,
+            all_coins,
+            sizes.as_deref(),
+            samples,
+            seed,
+        ),
+        Command::CompareSynthetic {
+            n,
+            l_max,
+            seed,
+            min_w,
+            block_size,
+            dp_max,
+        } => cmd_compare_synthetic(n, l_max, seed, min_w, block_size, dp_max),
+        Command::CompareAugmented {
+            tx_label,
+            tx_json,
+            inputs,
+            outputs,
+            new_inputs,
+            new_outputs,
+            block_size,
+            signed_method,
+        } => cmd_compare_augmented(
+            &TxSpec {
+                label: tx_label.as_deref(),
+                json: tx_json.as_deref(),
+                inputs_str: &inputs,
+                outputs_str: &outputs,
+            },
+            &new_inputs,
+            &new_outputs,
+            block_size,
+            &signed_method,
+        ),
+        Command::SuggestSplit {
+            inputs,
+            outputs,
+            change,
+            max_pieces,
+            block_size,
+            signed_method,
+        } => cmd_suggest_split(
+            &inputs,
+            &outputs,
+            change,
+            max_pieces,
+            block_size,
+            &signed_method,
+        ),
+        Command::CorrelateEstimators {
+            max_coins,
+            block_size,
+            signed_method,
+        } => cmd_correlate_estimators(max_coins, block_size, &signed_method),
+        Command::DenseBoundary {
+            tx_label,
+            tx_json,
+            inputs,
+            outputs,
+            samples,
+            seed,
+        } => cmd_dense_boundary(
+            &TxSpec {
+                label: tx_label.as_deref(),
+                json: tx_json.as_deref(),
+                inputs_str: &inputs,
+                outputs_str: &outputs,
+            },
+            samples,
+            seed,
+        ),
+        Command::FullReport {
+            tx_label,
+            tx_json,
+            inputs,
+            outputs,
+            block_size,
+            signed_method,
+        } => cmd_full_report(
+            &TxSpec {
+                label: tx_label.as_deref(),
+                json: tx_json.as_deref(),
+                inputs_str: &inputs,
+                outputs_str: &outputs,
+            },
+            block_size,
+            &signed_method,
+        ),
+        Command::Density {
+            tx_label,
+            tx_json,
+            values,
+            target,
+            block_size,
+        } => cmd_density(
+            tx_label.as_deref(),
+            tx_json.as_deref(),
+            &values,
+            target,
+            block_size,
+        ),
+        Command::EmpiricalNc {
+            block_size,
+            max_entries,
+        } => cmd_empirical_nc(block_size, max_entries),
+    }
 }
 
 #[derive(Subcommand)]
@@ -340,186 +522,4 @@ enum Command {
         #[arg(long)]
         signed_method: String,
     },
-}
-
-pub fn run(cli: Cli) {
-    match cli.command {
-        Command::DensityScan {
-            values,
-            steps,
-            min_log_w,
-        } => cmd_density_scan(&values, steps, min_log_w),
-        Command::AnalyzeTx { inputs, outputs } => cmd_analyze_tx(&inputs, &outputs),
-        Command::Estimate {
-            inputs,
-            outputs,
-            block_size,
-        } => cmd_estimate(&inputs, &outputs, block_size),
-        Command::Validate {
-            values,
-            min_w,
-            block_size,
-        } => cmd_validate(&values, min_w, block_size),
-        Command::Kappa { values, target } => cmd_kappa(&values, target),
-        Command::Measure {
-            inputs,
-            outputs,
-            block_size,
-        } => cmd_measure(&inputs, &outputs, block_size),
-        Command::Compare {
-            values,
-            min_w,
-            block_size,
-            csv,
-        } => cmd_compare(&values, min_w, block_size, csv),
-        Command::CompareFixtures { min_w, block_size } => cmd_compare_fixtures(min_w, block_size),
-        Command::CompareRandom {
-            n,
-            max_val,
-            seed,
-            min_w,
-            block_size,
-            matrix,
-        } => cmd_compare_random(n, max_val, seed, min_w, block_size, matrix),
-        Command::CompareWasabi2 {
-            max_coins,
-            block_size,
-            fee_handling,
-            signed_method,
-        } => cmd_compare_wasabi2(max_coins, block_size, &fee_handling, &signed_method),
-        Command::CoinMeasures {
-            tx_label,
-            tx_json,
-            inputs,
-            outputs,
-            block_size,
-            signed_method,
-        } => cmd_coin_measures(
-            &TxSpec {
-                label: tx_label.as_deref(),
-                json: tx_json.as_deref(),
-                inputs_str: &inputs,
-                outputs_str: &outputs,
-            },
-            block_size,
-            &signed_method,
-        ),
-        Command::SubsetDensity {
-            tx_label,
-            tx_json,
-            values,
-            all_coins,
-            sizes,
-            samples,
-            seed,
-        } => cmd_subset_density(
-            tx_label.as_deref(),
-            tx_json.as_deref(),
-            &values,
-            all_coins,
-            sizes.as_deref(),
-            samples,
-            seed,
-        ),
-        Command::CompareSynthetic {
-            n,
-            l_max,
-            seed,
-            min_w,
-            block_size,
-            dp_max,
-        } => cmd_compare_synthetic(n, l_max, seed, min_w, block_size, dp_max),
-        Command::CompareAugmented {
-            tx_label,
-            tx_json,
-            inputs,
-            outputs,
-            new_inputs,
-            new_outputs,
-            block_size,
-            signed_method,
-        } => cmd_compare_augmented(
-            &TxSpec {
-                label: tx_label.as_deref(),
-                json: tx_json.as_deref(),
-                inputs_str: &inputs,
-                outputs_str: &outputs,
-            },
-            &new_inputs,
-            &new_outputs,
-            block_size,
-            &signed_method,
-        ),
-        Command::SuggestSplit {
-            inputs,
-            outputs,
-            change,
-            max_pieces,
-            block_size,
-            signed_method,
-        } => cmd_suggest_split(
-            &inputs,
-            &outputs,
-            change,
-            max_pieces,
-            block_size,
-            &signed_method,
-        ),
-        Command::CorrelateEstimators {
-            max_coins,
-            block_size,
-            signed_method,
-        } => cmd_correlate_estimators(max_coins, block_size, &signed_method),
-        Command::DenseBoundary {
-            tx_label,
-            tx_json,
-            inputs,
-            outputs,
-            samples,
-            seed,
-        } => cmd_dense_boundary(
-            &TxSpec {
-                label: tx_label.as_deref(),
-                json: tx_json.as_deref(),
-                inputs_str: &inputs,
-                outputs_str: &outputs,
-            },
-            samples,
-            seed,
-        ),
-        Command::FullReport {
-            tx_label,
-            tx_json,
-            inputs,
-            outputs,
-            block_size,
-            signed_method,
-        } => cmd_full_report(
-            &TxSpec {
-                label: tx_label.as_deref(),
-                json: tx_json.as_deref(),
-                inputs_str: &inputs,
-                outputs_str: &outputs,
-            },
-            block_size,
-            &signed_method,
-        ),
-        Command::Density {
-            tx_label,
-            tx_json,
-            values,
-            target,
-            block_size,
-        } => cmd_density(
-            tx_label.as_deref(),
-            tx_json.as_deref(),
-            &values,
-            target,
-            block_size,
-        ),
-        Command::EmpiricalNc {
-            block_size,
-            max_entries,
-        } => cmd_empirical_nc(block_size, max_entries),
-    }
 }
