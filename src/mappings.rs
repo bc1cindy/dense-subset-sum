@@ -18,39 +18,6 @@ impl Mapping {
     }
 }
 
-fn partitions_match(a: &Partition, b: &Partition) -> bool {
-    let mut b_sums: Vec<u64> = b.iter().map(|s| s.iter().sum()).collect();
-    for set_a in a {
-        let sum_a: u64 = set_a.iter().sum();
-        if let Some(pos) = b_sums.iter().position(|&s| s == sum_a) {
-            b_sums.swap_remove(pos);
-        } else {
-            return false;
-        }
-    }
-    true
-}
-
-fn align_partitions(inputs: &Partition, outputs: &Partition) -> (Vec<Vec<u64>>, Vec<Vec<u64>>) {
-    let mut out_remaining: Vec<(u64, Vec<u64>)> = outputs
-        .iter()
-        .map(|s| (s.iter().sum(), s.clone()))
-        .collect();
-
-    let mut aligned_in = Vec::new();
-    let mut aligned_out = Vec::new();
-
-    for in_set in inputs {
-        let in_sum: u64 = in_set.iter().sum();
-        if let Some(pos) = out_remaining.iter().position(|(s, _)| *s == in_sum) {
-            aligned_in.push(in_set.clone());
-            aligned_out.push(out_remaining.swap_remove(pos).1);
-        }
-    }
-
-    (aligned_in, aligned_out)
-}
-
 /// Exponential in total coin count — practical up to ~25 coins.
 pub fn enumerate_mappings(tx: &Transaction) -> Vec<Mapping> {
     if tx.inputs.is_empty() || tx.outputs.is_empty() {
@@ -114,6 +81,106 @@ pub fn is_derived(mapping: &Mapping, all_mappings: &[Mapping]) -> bool {
         }
     }
     false
+}
+
+pub fn non_derived_mappings(mappings: &[Mapping]) -> Vec<Mapping> {
+    mappings
+        .iter()
+        .filter(|m| !is_derived(m, mappings))
+        .cloned()
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+pub struct MappingMetrics {
+    pub total_mappings: usize,
+    pub non_derived_count: usize,
+    /// log₂(non_derived_count), or 0 if count ≤ 1.
+    pub entropy: f64,
+    /// (input_idx, output_idx) pairs that share a sub-tx in every non-derived mapping.
+    pub deterministic_links: Vec<(usize, usize)>,
+}
+
+/// Returns `log₂(|non-derived mappings|)`, or `None` when the tx exceeds `max_coins`
+/// (enumeration is exponential — impractical past ~26 coins).
+pub fn boltzmann_entropy(tx: &Transaction, max_coins: usize) -> Option<f64> {
+    if tx.inputs.len() + tx.outputs.len() > max_coins {
+        return None;
+    }
+    Some(analyze(tx).entropy)
+}
+
+pub fn analyze(tx: &Transaction) -> MappingMetrics {
+    let all = enumerate_mappings(tx);
+    let non_derived = non_derived_mappings(&all);
+    let non_derived_count = non_derived.len();
+
+    let entropy = if non_derived_count <= 1 {
+        0.0
+    } else {
+        (non_derived_count as f64).log2()
+    };
+
+    // CJA partitions carry values not indices, so match by (value, nth occurrence).
+    let mut deterministic_links = Vec::new();
+    if !non_derived.is_empty() {
+        for (i_idx, &i_val) in tx.inputs.iter().enumerate() {
+            let i_occurrence = tx.inputs[..i_idx].iter().filter(|&&v| v == i_val).count();
+
+            for (o_idx, &o_val) in tx.outputs.iter().enumerate() {
+                let o_occurrence = tx.outputs[..o_idx].iter().filter(|&&v| v == o_val).count();
+
+                let always_together = non_derived.iter().all(|m| {
+                    let i_sub = find_occurrence_in_partition(&m.input_sets, i_val, i_occurrence);
+                    let o_sub = find_occurrence_in_partition(&m.output_sets, o_val, o_occurrence);
+                    i_sub.is_some() && i_sub == o_sub
+                });
+                if always_together {
+                    deterministic_links.push((i_idx, o_idx));
+                }
+            }
+        }
+    }
+
+    MappingMetrics {
+        total_mappings: all.len(),
+        non_derived_count,
+        entropy,
+        deterministic_links,
+    }
+}
+
+fn partitions_match(a: &Partition, b: &Partition) -> bool {
+    let mut b_sums: Vec<u64> = b.iter().map(|s| s.iter().sum()).collect();
+    for set_a in a {
+        let sum_a: u64 = set_a.iter().sum();
+        if let Some(pos) = b_sums.iter().position(|&s| s == sum_a) {
+            b_sums.swap_remove(pos);
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+fn align_partitions(inputs: &Partition, outputs: &Partition) -> (Vec<Vec<u64>>, Vec<Vec<u64>>) {
+    let mut out_remaining: Vec<(u64, Vec<u64>)> = outputs
+        .iter()
+        .map(|s| (s.iter().sum(), s.clone()))
+        .collect();
+
+    let mut aligned_in = Vec::new();
+    let mut aligned_out = Vec::new();
+
+    for in_set in inputs {
+        let in_sum: u64 = in_set.iter().sum();
+        if let Some(pos) = out_remaining.iter().position(|(s, _)| *s == in_sum) {
+            aligned_in.push(in_set.clone());
+            aligned_out.push(out_remaining.swap_remove(pos).1);
+        }
+    }
+
+    (aligned_in, aligned_out)
 }
 
 fn merge_sub_txs(m: &Mapping, i: usize, j: usize) -> Mapping {
@@ -180,24 +247,6 @@ fn mapping_equivalent(a: &Mapping, b: &Mapping) -> bool {
     a_parts == b_parts
 }
 
-pub fn non_derived_mappings(mappings: &[Mapping]) -> Vec<Mapping> {
-    mappings
-        .iter()
-        .filter(|m| !is_derived(m, mappings))
-        .cloned()
-        .collect()
-}
-
-#[derive(Debug, Clone)]
-pub struct MappingMetrics {
-    pub total_mappings: usize,
-    pub non_derived_count: usize,
-    /// log₂(non_derived_count), or 0 if count ≤ 1.
-    pub entropy: f64,
-    /// (input_idx, output_idx) pairs that share a sub-tx in every non-derived mapping.
-    pub deterministic_links: Vec<(usize, usize)>,
-}
-
 fn find_occurrence_in_partition(sets: &[Vec<u64>], val: u64, occurrence: usize) -> Option<usize> {
     let mut seen = 0;
     for (s, set) in sets.iter().enumerate() {
@@ -208,55 +257,6 @@ fn find_occurrence_in_partition(sets: &[Vec<u64>], val: u64, occurrence: usize) 
         seen += count_in_set;
     }
     None
-}
-
-/// Returns `log₂(|non-derived mappings|)`, or `None` when the tx exceeds `max_coins`
-/// (enumeration is exponential — impractical past ~26 coins).
-pub fn boltzmann_entropy(tx: &Transaction, max_coins: usize) -> Option<f64> {
-    if tx.inputs.len() + tx.outputs.len() > max_coins {
-        return None;
-    }
-    Some(analyze(tx).entropy)
-}
-
-pub fn analyze(tx: &Transaction) -> MappingMetrics {
-    let all = enumerate_mappings(tx);
-    let non_derived = non_derived_mappings(&all);
-    let non_derived_count = non_derived.len();
-
-    let entropy = if non_derived_count <= 1 {
-        0.0
-    } else {
-        (non_derived_count as f64).log2()
-    };
-
-    // CJA partitions carry values not indices, so match by (value, nth occurrence).
-    let mut deterministic_links = Vec::new();
-    if !non_derived.is_empty() {
-        for (i_idx, &i_val) in tx.inputs.iter().enumerate() {
-            let i_occurrence = tx.inputs[..i_idx].iter().filter(|&&v| v == i_val).count();
-
-            for (o_idx, &o_val) in tx.outputs.iter().enumerate() {
-                let o_occurrence = tx.outputs[..o_idx].iter().filter(|&&v| v == o_val).count();
-
-                let always_together = non_derived.iter().all(|m| {
-                    let i_sub = find_occurrence_in_partition(&m.input_sets, i_val, i_occurrence);
-                    let o_sub = find_occurrence_in_partition(&m.output_sets, o_val, o_occurrence);
-                    i_sub.is_some() && i_sub == o_sub
-                });
-                if always_together {
-                    deterministic_links.push((i_idx, o_idx));
-                }
-            }
-        }
-    }
-
-    MappingMetrics {
-        total_mappings: all.len(),
-        non_derived_count,
-        entropy,
-        deterministic_links,
-    }
 }
 
 #[cfg(test)]
