@@ -52,6 +52,92 @@ pub fn log_w_for_e_sat(a: &[u64], e_target: u64) -> Option<f64> {
     log_w_for_e(&a_norm, e_norm)
 }
 
+/// Sasamoto estimator for the signed probe: log W_signed(target) in O(N).
+///
+/// W_signed(target) = #{(S ⊆ pos, T ⊆ neg) : ΣS − ΣT = target}. Used when
+/// either side alone is too small for (3.9) to be reliable, but the combined
+/// ±multiset is large enough. Decomposes as
+///   log W_signed(target) = max_s [log W_pos(s) + log W_neg(s − target)]
+/// and golden-section searches over s. Both inner calls go through (3.9) via
+/// `log_w_for_e_sat`.
+///
+/// `s` is snapped to max(gcd_pos, gcd_neg) so both inner calls stay on their
+/// valid GCD lattice (see `log_w_for_e_sat`); the objective becomes a step
+/// function, but the snapping is deterministic so golden-section still
+/// converges to the plateau maximum.
+pub fn log_w_signed_sasamoto(positives: &[u64], negatives: &[u64], target: i64) -> Option<f64> {
+    if positives.is_empty() || negatives.is_empty() {
+        return None;
+    }
+    let sum_pos: u64 = positives.iter().sum();
+    let sum_neg: u64 = negatives.iter().sum();
+
+    let gcd_pos = gcd_slice(positives).max(1);
+    let gcd_neg = gcd_slice(negatives).max(1);
+    let step = gcd_pos.max(gcd_neg) as f64;
+
+    let s_lo = target.max(0) as f64 + step;
+    let s_hi = ((sum_pos as f64) - step).min(sum_neg as f64 + target as f64 - step);
+    if s_lo >= s_hi {
+        return None;
+    }
+
+    let eval = |s: f64| -> f64 {
+        let s_pos_raw = s.round().max(1.0) as u64;
+        let s_pos = ((s_pos_raw + gcd_pos / 2) / gcd_pos) * gcd_pos;
+        let s_neg_i64 = s_pos as i64 - target;
+        if s_neg_i64 <= 0 {
+            return f64::NEG_INFINITY;
+        }
+        let s_neg_raw = s_neg_i64 as u64;
+        let s_neg = ((s_neg_raw + gcd_neg / 2) / gcd_neg) * gcd_neg;
+        if s_pos == 0 || s_pos >= sum_pos || s_neg == 0 || s_neg >= sum_neg {
+            return f64::NEG_INFINITY;
+        }
+        let lp = log_w_for_e_sat(positives, s_pos).unwrap_or(f64::NEG_INFINITY);
+        let ln = log_w_for_e_sat(negatives, s_neg).unwrap_or(f64::NEG_INFINITY);
+        lp + ln
+    };
+
+    let gr = (5.0_f64.sqrt() - 1.0) / 2.0;
+    let mut a = s_lo;
+    let mut b = s_hi;
+    let mut c = b - gr * (b - a);
+    let mut d = a + gr * (b - a);
+    let mut fc = eval(c);
+    let mut fd = eval(d);
+
+    for _ in 0..100 {
+        if (b - a).abs() < 1.0 {
+            break;
+        }
+        if fc < fd {
+            a = c;
+            c = d;
+            fc = fd;
+            d = a + gr * (b - a);
+            fd = eval(d);
+        } else {
+            b = d;
+            d = c;
+            fd = fc;
+            c = b - gr * (b - a);
+            fc = eval(c);
+        }
+    }
+
+    let best = fc.max(fd);
+    let at_lo = eval(s_lo);
+    let at_hi = eval(s_hi);
+    let result = best.max(at_lo).max(at_hi);
+
+    if result.is_finite() {
+        Some(result)
+    } else {
+        None
+    }
+}
+
 /// Sasamoto critical subset size (paper appendix A.7):
 /// `N_c(A) = ½·log₂(π/2·Σaⱼ²)`.
 ///
@@ -160,6 +246,7 @@ fn gcd(a: u64, b: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lookup::log_lookup_w_signed_target_aware;
 
     /// W(E) = C(N, E) when all aⱼ = 1 (paper §6, β = ln(N/E - 1)).
     #[test]
@@ -338,6 +425,38 @@ mod tests {
     #[test]
     fn test_log_w_for_e_sat_all_zeros_returns_none() {
         assert!(log_w_for_e_sat(&[0, 0, 0], 0).is_none());
+    }
+
+    #[test]
+    fn test_log_w_signed_sasamoto_large_n_finite() {
+        let pos: Vec<u64> = (1..=100).map(|i| i * 1000).collect();
+        let neg: Vec<u64> = (1..=100).map(|i| i * 1000).collect();
+        let result = log_w_signed_sasamoto(&pos, &neg, 0);
+        assert!(result.is_some(), "Sasamoto should work for 200 coins");
+        assert!(
+            result.unwrap() > 0.0,
+            "balanced 200-coin set should have positive log W_signed"
+        );
+    }
+
+    #[test]
+    fn test_log_w_signed_sasamoto_small_agrees_with_lookup() {
+        let pos: Vec<u64> = (10..=20).collect();
+        let neg: Vec<u64> = (10..=20).collect();
+        let target = 0i64;
+        let sas = log_w_signed_sasamoto(&pos, &neg, target);
+        let lookup = log_lookup_w_signed_target_aware(&pos, &neg, target, 11, 1_000_000);
+        if let (Some(s), Some(l)) = (sas, lookup) {
+            let diff = (s - l).abs();
+            eprintln!(
+                "Sasamoto signed={:.2}, lookup signed={:.2}, diff={:.2}",
+                s, l, diff
+            );
+            assert!(
+                diff < 5.0,
+                "Sasamoto and exact lookup should roughly agree for moderate N"
+            );
+        }
     }
 
     #[test]
