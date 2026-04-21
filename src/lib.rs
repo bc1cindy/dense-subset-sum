@@ -11,6 +11,7 @@ pub mod estimator;
 pub mod fixtures;
 pub mod lookup;
 pub mod mappings;
+pub mod penalty;
 pub mod radix;
 pub mod regime;
 pub mod sasamoto;
@@ -20,6 +21,7 @@ pub mod validation;
 
 pub use dense_region::find_dense_region;
 pub use empirical_regime::{EmpiricalRegime, empirical_regime};
+pub use penalty::{cluster_penalty_log, global_nc_over_n, m_sqrt_over_2, per_input_penalty_log};
 pub use lookup::{
     DEFAULT_MAX_ENTRIES, LookupConfig, SignedMethod, brute_force_w, dp_w, dp_w_restricted,
     log_dp_w, log_dp_w_restricted, log_lookup_w, log_lookup_w_signed_target_aware,

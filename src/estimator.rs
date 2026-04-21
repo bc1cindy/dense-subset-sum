@@ -6,10 +6,8 @@
 
 use crate::validation;
 use crate::{
-    EmpiricalRegime, SASAMOTO_MIN_N, SignedMethod, Transaction, arbitrary_distinctness_log2,
-    best_radix_base, coverage_bonus_log2, denomination_reward_log2, density_regime,
-    distinguish_coins, empirical_regime, is_radix_like_any_base, kappa, log_dp_w, log_lookup_w,
-    log_w_for_e_sat, log_w_signed, n_c,
+    EmpiricalRegime, SASAMOTO_MIN_N, SignedMethod, Transaction, density_regime, empirical_regime,
+    is_radix_like_any_base, kappa, log_dp_w, log_lookup_w, log_w_for_e_sat, log_w_signed, n_c,
 };
 
 #[derive(Debug, Clone)]
@@ -85,24 +83,6 @@ fn select_estimator(a: &[u64], config: &EstimatorConfig) -> EstimatorChoice {
     }
 }
 
-/// Natural-log lower bound from the radix composite (coverage + reward + arb distinctness).
-fn radix_composite_log_w(a: &[u64], e_target: u64, hw_threshold: u32) -> Option<f64> {
-    let (base, mults) = best_radix_base(a, hw_threshold)?;
-    if mults.is_empty() {
-        return None;
-    }
-    let (_, arb) = distinguish_coins(a, base, hw_threshold);
-    let cov = coverage_bonus_log2(e_target, base, &mults);
-    let rew = denomination_reward_log2(&mults);
-    let arb_bonus = arbitrary_distinctness_log2(&arb);
-    let log2_w = cov + rew + arb_bonus;
-    if log2_w > 0.0 {
-        Some(log2_w * 2.0_f64.ln())
-    } else {
-        None
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Regime {
     Dense,
@@ -148,7 +128,6 @@ pub fn estimate_density(a: &[u64], e_target: u64, config: &EstimatorConfig) -> D
         };
     }
 
-    let use_radix = is_radix_like_any_base(a, config.radix_hw_threshold);
     let choice = select_estimator(a, config);
 
     let (log_w, reliable) = match choice {
@@ -164,20 +143,8 @@ pub fn estimate_density(a: &[u64], e_target: u64, config: &EstimatorConfig) -> D
         }
         EstimatorChoice::Lookup => {
             let lookup = log_lookup_w(a, e_target, config.lookup_k);
-            // Max of two sound lower bounds is the tighter one.
-            let merged = if use_radix {
-                let radix = radix_composite_log_w(a, e_target, config.radix_hw_threshold);
-                match (lookup, radix) {
-                    (Some(l), Some(r)) => Some(l.max(r)),
-                    (Some(l), None) => Some(l),
-                    (None, Some(r)) => Some(r),
-                    (None, None) => None,
-                }
-            } else {
-                lookup
-            };
-            let reliable = matches!(merged, Some(lw) if lw > 0.0);
-            (merged, reliable)
+            let reliable = matches!(lookup, Some(lw) if lw > 0.0);
+            (lookup, reliable)
         }
         EstimatorChoice::SasamotoLookupMin => {
             let sas = log_w_for_e_sat(a, e_target);
@@ -205,7 +172,6 @@ pub fn estimate_density(a: &[u64], e_target: u64, config: &EstimatorConfig) -> D
             let kappa_dense = density_regime(a, e_target).map(|(_, _, d)| d);
             let confirmed = reliable
                 && (matches!(choice, EstimatorChoice::ExactDp)
-                    || use_radix
                     || kappa_dense.unwrap_or(false));
             if confirmed {
                 Regime::Dense
@@ -530,15 +496,6 @@ mod tests {
         }
 
         assert!(*means.last().unwrap() >= means[0]);
-    }
-
-    #[test]
-    fn test_radix_composite_log_w_manual() {
-        // 4×8, target=12, base=2: reward=log2(3)+0.5, coverage=4·log2(4)=8.
-        let a: Vec<u64> = vec![8, 8, 8, 8];
-        let result = radix_composite_log_w(&a, 12, 1).expect("some structure");
-        let expected_ln = (3f64.log2() + 0.5 + 8.0) * 2f64.ln();
-        assert!((result - expected_ln).abs() < 1e-9);
     }
 
     #[test]
