@@ -3,11 +3,13 @@
 //! W(E) = number of input subsets that sum to E. Provides exact (DP),
 //! lookup lower-bound, and Sasamoto asymptotic estimators.
 
+pub mod dense_region;
 pub mod lookup;
 pub mod regime;
 pub mod sasamoto;
 pub mod stats;
 
+pub use dense_region::find_dense_region;
 pub use lookup::{
     DEFAULT_MAX_ENTRIES, LookupConfig, SignedMethod, brute_force_w, dp_w, dp_w_restricted,
     log_dp_w, log_dp_w_restricted, log_lookup_w, log_lookup_w_signed_target_aware,
