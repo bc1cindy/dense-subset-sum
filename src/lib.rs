@@ -7,6 +7,7 @@ pub mod dense_region;
 pub mod empirical_regime;
 pub mod fixtures;
 pub mod lookup;
+pub mod mappings;
 pub mod radix;
 pub mod regime;
 pub mod sasamoto;
