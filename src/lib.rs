@@ -30,7 +30,7 @@ pub use radix::{
     is_radix_like_any_base, is_radix_like_in_base,
 };
 pub use regime::{density_regime, kappa, kappa_c};
-pub use sasamoto::{log_w_for_e, log_w_for_e_sat, log_w_signed_sasamoto};
+pub use sasamoto::{log_w_for_e, log_w_for_e_sat, log_w_signed_sasamoto, n_c};
 pub use transaction::Transaction;
 
 pub(crate) use sasamoto::gcd_slice;
