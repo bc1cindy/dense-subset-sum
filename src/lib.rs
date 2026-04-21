@@ -4,9 +4,11 @@
 //! lookup lower-bound, and Sasamoto asymptotic estimators.
 
 pub mod regime;
+pub mod sasamoto;
 pub mod stats;
 
 pub use regime::{density_regime, kappa, kappa_c};
+pub use sasamoto::log_w_for_e;
 pub use transaction::Transaction;
 
 mod transaction;
