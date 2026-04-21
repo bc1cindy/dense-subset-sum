@@ -52,6 +52,21 @@ pub fn log_w_for_e_sat(a: &[u64], e_target: u64) -> Option<f64> {
     log_w_for_e(&a_norm, e_norm)
 }
 
+/// Sasamoto critical subset size (paper appendix A.7):
+/// `N_c(A) = ½·log₂(π/2·Σaⱼ²)`.
+///
+/// Compared against `N`: when `N ≫ N_c`, the asymptotic formula is in its
+/// dense-regime sweet spot. When `N_c/(N − N_mine)` is small the W-based
+/// penalty terms are reliable; when it isn't, the asymptotic is presumed
+/// wrong and those terms should be gated off.
+pub fn n_c(a: &[u64]) -> f64 {
+    let sum_sq: f64 = a.iter().map(|&v| (v as f64).powi(2)).sum();
+    if sum_sq <= 0.0 {
+        return f64::NAN;
+    }
+    0.5 * (PI * 0.5 * sum_sq).log2()
+}
+
 pub(crate) fn gcd_slice(vals: &[u64]) -> u64 {
     vals.iter().copied().fold(0, gcd)
 }
@@ -323,5 +338,26 @@ mod tests {
     #[test]
     fn test_log_w_for_e_sat_all_zeros_returns_none() {
         assert!(log_w_for_e_sat(&[0, 0, 0], 0).is_none());
+    }
+
+    #[test]
+    fn test_n_c_closed_form_all_ones() {
+        let a = vec![1u64; 10];
+        let expected = 0.5 * (PI * 0.5 * 10.0).log2();
+        assert!((n_c(&a) - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_n_c_grows_with_magnitude() {
+        // Scaling A by c multiplies Σa² by c², adds log₂(c) to N_c.
+        let a = vec![3u64, 7, 11, 13, 17];
+        let scaled: Vec<u64> = a.iter().map(|&v| v * 100).collect();
+        assert!(((n_c(&scaled) - n_c(&a)) - 100f64.log2()).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_n_c_degenerate() {
+        assert!(n_c(&[]).is_nan());
+        assert!(n_c(&[0, 0, 0]).is_nan());
     }
 }
