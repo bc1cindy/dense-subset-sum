@@ -3,6 +3,7 @@
 //! W(E) = number of input subsets that sum to E. Provides exact (DP),
 //! lookup lower-bound, and Sasamoto asymptotic estimators.
 
+pub mod change_split;
 pub mod comparison;
 pub mod dense_region;
 pub mod empirical_regime;
