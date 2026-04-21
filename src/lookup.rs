@@ -690,7 +690,11 @@ mod tests {
             let w_sum: u128 = (0..=a.len())
                 .map(|m| dp_w_restricted(&a, m, e, 1_000_000).unwrap())
                 .sum();
-            assert_eq!(w_sum, w_total, "e={}: Σ_m W(m,e)={}, W(e)={}", e, w_sum, w_total);
+            assert_eq!(
+                w_sum, w_total,
+                "e={}: Σ_m W(m,e)={}, W(e)={}",
+                e, w_sum, w_total
+            );
         }
     }
 

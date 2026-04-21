@@ -1,9 +1,19 @@
 //! Per-tx full reports, per-coin measurements, estimator correlation, and split suggestions.
 
 use dense_subset_sum::{
-    brute_force_w, change_split, estimator, fixtures, kappa, log_lookup_w, log_w_for_e_sat,
-    mappings, validation,
+    EmpiricalRegime, brute_force_w, change_split, estimator, fixtures, is_distinguished, kappa,
+    log_lookup_w, log_w_for_e_sat, mappings, validation,
 };
+
+fn fmt_regime(r: Option<EmpiricalRegime>) -> &'static str {
+    match r {
+        Some(EmpiricalRegime::EqualAmount) => "equal-amount",
+        Some(EmpiricalRegime::RadixGeometric) => "radix-geometric",
+        Some(EmpiricalRegime::Arithmetic) => "arithmetic",
+        Some(EmpiricalRegime::PathologicalBatch) => "pathological-batch",
+        None => "—",
+    }
+}
 
 use super::{
     Transaction, TxSpec, fmt_log_w, parse_signed_method, parse_tx, parse_values, per_coin_summary,
@@ -161,9 +171,9 @@ pub(crate) fn cmd_measure(inputs_str: &str, outputs_str: &str, block_size: usize
         tx.outputs.len()
     );
     println!(
-        "Regime: κ={:.3}, radix={}, estimator={}",
+        "Regime: κ={:.3}, empirical={}, estimator={}",
         regime.kappa,
-        regime.is_radix,
+        fmt_regime(regime.empirical_regime),
         regime.estimator.as_str()
     );
 
@@ -214,9 +224,9 @@ pub(crate) fn cmd_full_report(tx_spec: &TxSpec<'_>, block_size: usize, signed_me
         .map(|b| b.to_string())
         .unwrap_or_else(|| "—".into());
     println!(
-        "  κ = {:.4}, radix-like = {}, dense_at_quartile = {}, estimator_picked = {}",
+        "  κ = {:.4}, empirical = {}, dense_at_quartile = {}, estimator_picked = {}",
         regime.kappa,
-        regime.is_radix,
+        fmt_regime(regime.empirical_regime),
         dense_str,
         regime.estimator.as_str()
     );
@@ -274,19 +284,21 @@ pub(crate) fn cmd_full_report(tx_spec: &TxSpec<'_>, block_size: usize, signed_me
         }
     }
 
-    println!("\n── Radix structure (inputs) ──");
-    for &base in &dense_subset_sum::RADIX_BASES {
-        let (dist, arb) =
-            dense_subset_sum::distinguish_coins(&tx.inputs, base, cfg.radix_hw_threshold);
-        let mults = dense_subset_sum::denomination_multiplicities(&dist);
-        println!(
-            "  base={:>2}: distinguished={}, arbitrary={}, denoms={}",
-            base,
-            dist.len(),
-            arb.len(),
-            mults.len()
-        );
-    }
+    println!("\n── Denomination structure (inputs) ──");
+    let distinguished: usize = tx.inputs.iter().filter(|&&v| is_distinguished(v)).count();
+    let distinct_distinguished: std::collections::BTreeSet<u64> = tx
+        .inputs
+        .iter()
+        .copied()
+        .filter(|&v| is_distinguished(v))
+        .collect();
+    println!(
+        "  empirical_regime = {}, distinguished = {}/{}, distinct_denoms = {}",
+        fmt_regime(dense_subset_sum::empirical_regime(&tx.inputs)),
+        distinguished,
+        tx.inputs.len(),
+        distinct_distinguished.len(),
+    );
 }
 
 pub(crate) fn cmd_correlate_estimators(

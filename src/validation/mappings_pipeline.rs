@@ -6,7 +6,7 @@
 use super::sub_tx_estimates::{SubTxEstimate, estimate_sub_txs};
 use crate::mappings;
 use crate::stats::{median, pearson_correlation, spearman_correlation};
-use crate::{SignedMethod, Transaction, is_radix_like_in_base, log_w_signed};
+use crate::{EmpiricalRegime, SignedMethod, Transaction, empirical_regime, log_w_signed};
 
 #[derive(Debug, Clone)]
 pub struct ValidationSummary {
@@ -52,8 +52,10 @@ pub fn validate_estimators(
             ));
         }
 
-        if is_radix_like_in_base(a, 2, 1) {
-            regime_notes.push(format!("N={}: radix-like values detected", n));
+        if let Some(r) = empirical_regime(a)
+            && r != EmpiricalRegime::PathologicalBatch
+        {
+            regime_notes.push(format!("N={}: empirical regime = {:?}", n, r));
         }
     }
 

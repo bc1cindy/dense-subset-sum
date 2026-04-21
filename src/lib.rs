@@ -21,18 +21,14 @@ pub mod validation;
 
 pub use dense_region::find_dense_region;
 pub use empirical_regime::{EmpiricalRegime, empirical_regime};
-pub use penalty::{cluster_penalty_log, global_nc_over_n, m_sqrt_over_2, per_input_penalty_log};
 pub use lookup::{
     DEFAULT_MAX_ENTRIES, LookupConfig, SignedMethod, brute_force_w, dp_w, dp_w_restricted,
     log_dp_w, log_dp_w_restricted, log_lookup_w, log_lookup_w_signed_target_aware,
     log_lookup_w_signed_target_aware_with_config, log_lookup_w_with_config, log_w_signed,
     log_w_signed_with_config, lookup_w, lookup_w_with_config, sumset_size_with_config,
 };
-pub use radix::{
-    DISTINGUISHED, RADIX_BASES, arbitrary_distinctness_log2, best_radix_base, coverage_bonus_log2,
-    denomination_multiplicities, denomination_reward_log2, distinguish_coins, is_distinguished,
-    is_radix_like_any_base, is_radix_like_in_base,
-};
+pub use penalty::{cluster_penalty_log, global_nc_over_n, m_sqrt_over_2, per_input_penalty_log};
+pub use radix::{DISTINGUISHED, is_distinguished};
 pub use regime::{density_regime, kappa, kappa_c};
 pub use sasamoto::{log_w_for_e, log_w_for_e_sat, log_w_signed_sasamoto, n_c};
 pub use transaction::Transaction;

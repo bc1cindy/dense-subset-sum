@@ -7,13 +7,12 @@
 use crate::validation;
 use crate::{
     EmpiricalRegime, SASAMOTO_MIN_N, SignedMethod, Transaction, density_regime, empirical_regime,
-    is_radix_like_any_base, kappa, log_dp_w, log_lookup_w, log_w_for_e_sat, log_w_signed, n_c,
+    kappa, log_dp_w, log_lookup_w, log_w_for_e_sat, log_w_signed, n_c,
 };
 
 #[derive(Debug, Clone)]
 pub struct EstimatorConfig {
     pub lookup_k: usize,
-    pub radix_hw_threshold: u32,
     pub force_conservative: bool,
     /// Try exact DP up to this N (default 20 = SASAMOTO_MIN_N collapses the dead band).
     pub exact_threshold: usize,
@@ -29,7 +28,6 @@ impl Default for EstimatorConfig {
     fn default() -> Self {
         Self {
             lookup_k: 15,
-            radix_hw_threshold: 2,
             force_conservative: false,
             exact_threshold: 20,
             dp_max_table: 10_000_000,
@@ -171,8 +169,7 @@ pub fn estimate_density(a: &[u64], e_target: u64, config: &EstimatorConfig) -> D
         Some(lw) if lw > 0.0 => {
             let kappa_dense = density_regime(a, e_target).map(|(_, _, d)| d);
             let confirmed = reliable
-                && (matches!(choice, EstimatorChoice::ExactDp)
-                    || kappa_dense.unwrap_or(false));
+                && (matches!(choice, EstimatorChoice::ExactDp) || kappa_dense.unwrap_or(false));
             if confirmed {
                 Regime::Dense
             } else {
@@ -310,14 +307,13 @@ fn tx_mean_signed(tx: &Transaction, config: &EstimatorConfig, method: SignedMeth
 #[derive(Debug, Clone)]
 pub struct RegimeInfo {
     pub kappa: f64,
-    pub is_radix: bool,
+    pub empirical_regime: Option<EmpiricalRegime>,
     pub estimator: EstimatorChoice,
     pub dense_at_quartile: Option<bool>,
 }
 
 pub fn analyze_regime(tx: &Transaction, config: &EstimatorConfig) -> RegimeInfo {
     let k = kappa(&tx.inputs).unwrap_or(f64::NAN);
-    let is_radix = is_radix_like_any_base(&tx.inputs, config.radix_hw_threshold);
     let estimator = select_estimator(&tx.inputs, config);
 
     let dense_at_quartile = {
@@ -333,7 +329,7 @@ pub fn analyze_regime(tx: &Transaction, config: &EstimatorConfig) -> RegimeInfo 
 
     RegimeInfo {
         kappa: k,
-        is_radix,
+        empirical_regime: empirical_regime(&tx.inputs),
         estimator,
         dense_at_quartile,
     }
@@ -401,10 +397,7 @@ mod tests {
     #[test]
     fn test_estimate_small_n_uses_exact_dp() {
         let a: Vec<u64> = (11..=26).collect();
-        let cfg = EstimatorConfig {
-            radix_hw_threshold: 1,
-            ..EstimatorConfig::default()
-        };
+        let cfg = EstimatorConfig::default();
         let target: u64 = a.iter().sum::<u64>() / 2;
         let regime = analyze_regime(&Transaction::new(a.clone(), vec![target]), &cfg);
         assert_eq!(regime.estimator, EstimatorChoice::ExactDp);
@@ -426,13 +419,9 @@ mod tests {
     }
 
     #[test]
-    fn test_estimate_radix_uses_lookup() {
+    fn test_estimate_powers_of_two() {
         let a: Vec<u64> = vec![1, 2, 4, 8, 16, 32, 64, 128, 256, 512];
-        let config = EstimatorConfig {
-            radix_hw_threshold: 1,
-            ..Default::default()
-        };
-        let s = estimate(&a, 500, &config);
+        let s = estimate(&a, 500, &EstimatorConfig::default());
         assert!(s >= 0.0);
     }
 
@@ -460,14 +449,13 @@ mod tests {
     #[test]
     fn test_regime_info() {
         let tx = fixtures::maurer_fig2();
-        // threshold=1 excludes values with ≥2 non-zero base-10 digits (default=2 passes them all).
-        let config = EstimatorConfig {
-            radix_hw_threshold: 1,
-            ..EstimatorConfig::default()
-        };
-        let regime = analyze_regime(&tx, &config);
-        assert!(!regime.is_radix);
+        let regime = analyze_regime(&tx, &EstimatorConfig::default());
         assert!(regime.kappa > 0.0);
+        // Maurer fig 2 is the canonical "no denomination structure" ensemble.
+        assert_ne!(
+            regime.empirical_regime,
+            Some(EmpiricalRegime::RadixGeometric)
+        );
     }
 
     #[test]
@@ -516,11 +504,7 @@ mod tests {
     fn test_estimate_density_exact_dp_small_n() {
         // W(5000) = C(10, 5) = 252 for 10×1000.
         let a: Vec<u64> = vec![1000; 10];
-        let cfg = EstimatorConfig {
-            radix_hw_threshold: 0,
-            ..Default::default()
-        };
-        let de = estimate_density(&a, 5000, &cfg);
+        let de = estimate_density(&a, 5000, &EstimatorConfig::default());
         assert_eq!(de.estimator_used, EstimatorChoice::ExactDp);
         assert_eq!(de.regime, Regime::Dense);
         assert!(de.reliable);
@@ -552,11 +536,7 @@ mod tests {
     #[test]
     fn test_estimate_density_equal_denom_dense() {
         let a: Vec<u64> = vec![8; 10];
-        let cfg = EstimatorConfig {
-            radix_hw_threshold: 1,
-            ..Default::default()
-        };
-        let de = estimate_density(&a, 40, &cfg);
+        let de = estimate_density(&a, 40, &EstimatorConfig::default());
         // N ≤ exact_threshold ⇒ ExactDp (strictly tighter than the old Lookup path).
         assert_eq!(de.estimator_used, EstimatorChoice::ExactDp);
         assert_eq!(de.regime, Regime::Dense);
@@ -567,12 +547,8 @@ mod tests {
     #[test]
     fn test_estimate_density_large_n_sasamoto_branch() {
         let a: Vec<u64> = (1..=25).collect();
-        let cfg = EstimatorConfig {
-            radix_hw_threshold: 0,
-            ..Default::default()
-        };
         let e_mid: u64 = a.iter().sum::<u64>() / 2;
-        let de = estimate_density(&a, e_mid, &cfg);
+        let de = estimate_density(&a, e_mid, &EstimatorConfig::default());
         assert_eq!(de.estimator_used, EstimatorChoice::SasamotoLookupMin);
         assert_eq!(de.regime, Regime::Dense);
         assert!(de.reliable);

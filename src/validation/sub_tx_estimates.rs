@@ -3,8 +3,11 @@
 use std::collections::HashMap;
 
 use super::exclude_values;
+use crate::estimator::saddle_reliable;
 use crate::mappings;
-use crate::{SASAMOTO_MIN_N, Transaction, is_radix_like_in_base, log_lookup_w, log_w_for_e_sat};
+use crate::{Transaction, log_lookup_w, log_w_for_e_sat};
+
+const DEFAULT_SADDLE_TAU: f64 = 0.5;
 
 /// Two-sided ambiguity: `log_w_combined = log_w_lookup_inputs + log_w_lookup_outputs`
 /// tracks `ln(count)` for balanced Maurer 2-partition mappings.
@@ -72,8 +75,7 @@ pub fn estimate_sub_txs(tx: &Transaction, lookup_k: usize) -> Vec<SubTxEstimate>
             _ => None,
         };
 
-        let sasamoto_reliable =
-            other_coins.len() >= SASAMOTO_MIN_N && !is_radix_like_in_base(&other_coins, 2, 2);
+        let sasamoto_reliable = saddle_reliable(&other_coins, DEFAULT_SADDLE_TAU);
 
         estimates.push(SubTxEstimate {
             inputs: ins,
