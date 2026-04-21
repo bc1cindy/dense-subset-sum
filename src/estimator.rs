@@ -4,6 +4,7 @@
 //! These are raw measurements. The cost-function framework that consumes them
 //! (scaling, thresholding, budget) lives outside this repo.
 
+use crate::validation;
 use crate::{
     EmpiricalRegime, SASAMOTO_MIN_N, SignedMethod, Transaction, density_regime, empirical_regime,
     kappa, log_dp_w, log_lookup_w, log_w_for_e_sat, log_w_signed, n_c,
@@ -316,11 +317,22 @@ fn select_estimator(a: &[u64], config: &EstimatorConfig) -> EstimatorChoice {
 }
 
 /// Mean log₂ W_signed over all coins. 0 for degenerate txs.
-///
-/// Stubbed in this commit; wired to the per-coin pipeline when the
-/// validation module is introduced.
-fn tx_mean_signed(_tx: &Transaction, _config: &EstimatorConfig, _method: SignedMethod) -> f64 {
-    0.0
+fn tx_mean_signed(tx: &Transaction, config: &EstimatorConfig, method: SignedMethod) -> f64 {
+    let total_coins = tx.inputs.len() + tx.outputs.len();
+    if total_coins < 2 {
+        return 0.0;
+    }
+    let measurements = validation::per_coin_measurements_fee_aware(tx, config.lookup_k, method);
+    let ln2 = std::f64::consts::LN_2;
+    let reachable: Vec<f64> = measurements
+        .iter()
+        .filter_map(|c| c.log_w_signed)
+        .map(|v| v / ln2)
+        .collect();
+    if reachable.is_empty() {
+        return 0.0;
+    }
+    reachable.iter().sum::<f64>() / reachable.len() as f64
 }
 
 #[cfg(test)]
