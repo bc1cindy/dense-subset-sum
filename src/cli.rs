@@ -5,8 +5,9 @@ use clap::{Parser, Subcommand};
 use crate::commands::{
     TxSpec, cmd_analyze_tx, cmd_coin_measures, cmd_compare, cmd_compare_augmented,
     cmd_compare_fixtures, cmd_compare_random, cmd_compare_synthetic, cmd_compare_wasabi2,
-    cmd_correlate_estimators, cmd_dense_boundary, cmd_density, cmd_density_scan, cmd_estimate,
-    cmd_full_report, cmd_kappa, cmd_measure, cmd_subset_density, cmd_suggest_split, cmd_validate,
+    cmd_correlate_estimators, cmd_dense_boundary, cmd_density, cmd_density_scan,
+    cmd_empirical_nc, cmd_estimate, cmd_full_report, cmd_kappa, cmd_measure, cmd_subset_density,
+    cmd_suggest_split, cmd_validate,
 };
 
 #[derive(Parser)]
@@ -242,6 +243,15 @@ enum Command {
         /// to the SignedMultiset fee-handling row.
         #[arg(long)]
         signed_method: String,
+    },
+    /// Empirical N_c/N vs |sumset| study across Wasabi2 fixtures (TSV to stdout).
+    EmpiricalNc {
+        /// Block size for the sumset enumeration.
+        #[arg(short = 'k', long, default_value = "10")]
+        block_size: usize,
+        /// Max entries in the sumset table (cap to bound memory).
+        #[arg(long, default_value = "2000000")]
+        max_entries: usize,
     },
     /// Unified density API: 3-tier scale switch (exact DP → lookup → Sasamoto).
     Density {
@@ -507,5 +517,9 @@ pub fn run(cli: Cli) {
             target,
             block_size,
         ),
+        Command::EmpiricalNc {
+            block_size,
+            max_entries,
+        } => cmd_empirical_nc(block_size, max_entries),
     }
 }

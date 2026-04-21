@@ -1,7 +1,8 @@
 //! κ/κ_c regime tooling, target sweeps, and subset-size density sweeps.
 
 use dense_subset_sum::{
-    density_regime, estimator, find_dense_region, kappa, kappa_c, log_w_for_e, validation,
+    LookupConfig, density_regime, empirical_regime, estimator, find_dense_region, fixtures,
+    kappa, kappa_c, log_w_for_e, n_c, sumset_size_with_config, validation,
 };
 
 use super::{TxSpec, parse_values, parse_values_f64, resolve_tx, resolve_values};
@@ -230,4 +231,46 @@ pub(crate) fn cmd_subset_density(
 
     let rows = validation::subset_density_sweep(&values, &sizes, samples, seed);
     validation::print_subset_density_sweep(&label, values.len(), &rows);
+}
+
+pub(crate) fn cmd_empirical_nc(block_size: usize, max_entries: usize) {
+    let cfg = LookupConfig::from_max_entries(max_entries);
+    println!("# label              fixture id (w2_… negatives, w2pos_… positives)");
+    println!("# class              neg = false coinjoin, pos = real Wasabi2 coinjoin");
+    println!("# N                  number of inputs");
+    println!("# nc                 Sasamoto critical size ½·log₂(π/2·Σaⱼ²) (paper A.7)");
+    println!("# nc_over_n          nc/N; saddle is reliable when ≪ 1 (gate threshold τ=0.5)");
+    println!("# sumset_size        distinct reachable sums up to block_size convolution");
+    println!("# sumset_saturated   true when sumset_size hit the max_entries cap");
+    println!("# regime             EqualAmount / RadixGeometric / Arithmetic / PathologicalBatch");
+    println!("label\tclass\tN\tnc\tnc_over_n\tsumset_size\tsumset_saturated\tregime");
+    let all = fixtures::all_wasabi2_false_cjtxs()
+        .into_iter()
+        .map(|(l, tx)| ("neg", l, tx))
+        .chain(
+            fixtures::all_wasabi2_positive_cjtxs()
+                .into_iter()
+                .map(|(l, tx)| ("pos", l, tx)),
+        );
+    for (class, label, tx) in all {
+        let a = &tx.inputs;
+        let n = a.len();
+        let nc = n_c(a);
+        let sumset = sumset_size_with_config(a, block_size, &cfg);
+        let saturated = sumset >= cfg.max_entries;
+        let regime = empirical_regime(a)
+            .map(|r| format!("{:?}", r))
+            .unwrap_or_else(|| "—".into());
+        println!(
+            "{}\t{}\t{}\t{:.3}\t{:.4}\t{}\t{}\t{}",
+            label,
+            class,
+            n,
+            nc,
+            nc / n as f64,
+            sumset,
+            saturated,
+            regime,
+        );
+    }
 }

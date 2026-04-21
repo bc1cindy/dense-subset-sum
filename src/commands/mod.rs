@@ -21,7 +21,8 @@ pub(crate) use compare::{
     cmd_compare_wasabi2, cmd_validate,
 };
 pub(crate) use density::{
-    cmd_dense_boundary, cmd_density, cmd_density_scan, cmd_kappa, cmd_subset_density,
+    cmd_dense_boundary, cmd_density, cmd_density_scan, cmd_empirical_nc, cmd_kappa,
+    cmd_subset_density,
 };
 
 use dense_subset_sum::{SignedMethod, Transaction, fixtures, stats, validation};

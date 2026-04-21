@@ -6,6 +6,7 @@
 pub mod change_split;
 pub mod comparison;
 pub mod dense_region;
+pub mod empirical_regime;
 pub mod estimator;
 pub mod fixtures;
 pub mod lookup;
@@ -18,11 +19,12 @@ mod transaction;
 pub mod validation;
 
 pub use dense_region::find_dense_region;
+pub use empirical_regime::{EmpiricalRegime, empirical_regime};
 pub use lookup::{
     DEFAULT_MAX_ENTRIES, LookupConfig, SignedMethod, brute_force_w, dp_w, dp_w_restricted,
     log_dp_w, log_dp_w_restricted, log_lookup_w, log_lookup_w_signed_target_aware,
     log_lookup_w_signed_target_aware_with_config, log_lookup_w_with_config, log_w_signed,
-    log_w_signed_with_config, lookup_w, lookup_w_with_config,
+    log_w_signed_with_config, lookup_w, lookup_w_with_config, sumset_size_with_config,
 };
 pub use radix::{
     DISTINGUISHED, RADIX_BASES, arbitrary_distinctness_log2, best_radix_base, coverage_bonus_log2,

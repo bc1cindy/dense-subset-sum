@@ -154,6 +154,17 @@ pub fn log_lookup_w(original_set: &[u64], e_target: u64, block_size: usize) -> O
     log_lookup_w_with_config(original_set, e_target, block_size, &LookupConfig::default())
 }
 
+/// Distinct reachable sums |{ΣS : S ⊆ A}|, bounded by `cfg.max_entries`.
+/// Conservative under the cap: the bound is a sub-sumset, so the true size
+/// may be larger when this returns `cfg.max_entries`.
+pub fn sumset_size_with_config(
+    original_set: &[u64],
+    block_size: usize,
+    cfg: &LookupConfig,
+) -> usize {
+    full_sumset(original_set, block_size, cfg.max_entries).len()
+}
+
 /// Like `log_lookup_w`, but with an explicit memory/entry max.
 pub fn log_lookup_w_with_config(
     original_set: &[u64],
