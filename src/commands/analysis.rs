@@ -5,16 +5,6 @@ use dense_subset_sum::{
     log_lookup_w, log_w_for_e_sat, mappings, validation,
 };
 
-fn fmt_regime(r: Option<EmpiricalRegime>) -> &'static str {
-    match r {
-        Some(EmpiricalRegime::EqualAmount) => "equal-amount",
-        Some(EmpiricalRegime::RadixGeometric) => "radix-geometric",
-        Some(EmpiricalRegime::Arithmetic) => "arithmetic",
-        Some(EmpiricalRegime::PathologicalBatch) => "pathological-batch",
-        None => "—",
-    }
-}
-
 use super::{
     Transaction, TxSpec, fmt_log_w, parse_signed_method, parse_tx, parse_values, per_coin_summary,
     resolve_tx, spearman_opt,
@@ -419,5 +409,15 @@ pub(crate) fn cmd_suggest_split(
         println!("  Mean signed log₂ W across all coins: {:.4}", best_mean);
     } else {
         println!("  (single-output case — mean undefined)");
+    }
+}
+
+fn fmt_regime(r: Option<EmpiricalRegime>) -> &'static str {
+    match r {
+        Some(EmpiricalRegime::EqualAmount) => "equal-amount",
+        Some(EmpiricalRegime::RadixGeometric) => "radix-geometric",
+        Some(EmpiricalRegime::Arithmetic) => "arithmetic",
+        Some(EmpiricalRegime::PathologicalBatch) => "pathological-batch",
+        None => "—",
     }
 }

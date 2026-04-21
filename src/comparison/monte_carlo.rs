@@ -8,9 +8,6 @@ use rand::{Rng, SeedableRng};
 
 use super::core::{CompareMode, ComparisonReport, build_report_from_counts};
 
-/// Sample-count interval between timeout checks in `compare_monte_carlo`.
-const MC_TIMEOUT_CHECK_INTERVAL: u64 = 1024;
-
 #[allow(clippy::too_many_arguments)]
 pub fn compare_monte_carlo(
     a: &[u64],
@@ -78,3 +75,6 @@ pub fn compare_monte_carlo(
         },
     )
 }
+
+/// Sample-count interval between timeout checks in `compare_monte_carlo`.
+const MC_TIMEOUT_CHECK_INTERVAL: u64 = 1024;

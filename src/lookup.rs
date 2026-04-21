@@ -70,11 +70,6 @@ pub fn log_w_signed_with_config(
 /// 2^22 ≈ 4M entries fits in ~100MB; unbounded N≥20 with sat-scale values hits 10^9 entries (OOM).
 pub const DEFAULT_MAX_ENTRIES: usize = 4_194_304;
 
-/// Nominal per-entry size: `u64` sum + `u128` count. Real `HashMap` has bucket
-/// overhead on top, so this is a lower bound used to convert between the two
-/// knobs; pick a memory budget conservatively.
-const ENTRY_SIZE_BYTES: usize = std::mem::size_of::<(u64, u128)>();
-
 /// Maximum sumset during block convolution. Both `max_memory_bytes` and
 /// `max_entries` are exposed so callers can reason about whichever resource is
 /// scarce; use `from_memory_bytes` or `from_max_entries` to keep them consistent.
@@ -489,6 +484,11 @@ fn full_sumset_near_target(
     }
     combined
 }
+
+/// Nominal per-entry size: `u64` sum + `u128` count. Real `HashMap` has bucket
+/// overhead on top, so this is a lower bound used to convert between the two
+/// knobs; pick a memory budget conservatively.
+const ENTRY_SIZE_BYTES: usize = std::mem::size_of::<(u64, u128)>();
 
 #[cfg(test)]
 mod tests {

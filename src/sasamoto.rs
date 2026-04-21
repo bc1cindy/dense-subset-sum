@@ -138,10 +138,6 @@ pub fn log_w_signed_sasamoto(positives: &[u64], negatives: &[u64], target: i64) 
     }
 }
 
-pub(crate) fn gcd_slice(vals: &[u64]) -> u64 {
-    vals.iter().copied().fold(0, gcd)
-}
-
 /// Sasamoto critical subset size (paper appendix A.7):
 /// `N_c(A) = ½·log₂(π/2·Σaⱼ²)`.
 ///
@@ -155,6 +151,10 @@ pub fn n_c(a: &[u64]) -> f64 {
         return f64::NAN;
     }
     0.5 * (PI * 0.5 * sum_sq).log2()
+}
+
+pub(crate) fn gcd_slice(vals: &[u64]) -> u64 {
+    vals.iter().copied().fold(0, gcd)
 }
 
 /// Solves (3.10) for β given target E: finds the saddle around which (3.9)

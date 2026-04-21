@@ -8,10 +8,6 @@
 //! Shared parsing / tx-resolution helpers live in this module and are
 //! `pub(super)` for the three submodules.
 
-mod analysis;
-mod compare;
-mod density;
-
 pub(crate) use analysis::{
     cmd_analyze_tx, cmd_coin_measures, cmd_compare_augmented, cmd_correlate_estimators,
     cmd_estimate, cmd_full_report, cmd_measure, cmd_suggest_split,
@@ -63,31 +59,6 @@ pub(super) fn spearman_opt(x: &[f64], y: &[f64]) -> Option<f64> {
     }
     let r = stats::spearman_correlation(x, y);
     if r.is_nan() { None } else { Some(r) }
-}
-
-#[derive(serde::Deserialize)]
-struct TxJson {
-    #[serde(default)]
-    label: Option<String>,
-    inputs: Vec<u64>,
-    outputs: Vec<u64>,
-}
-
-fn load_tx_json(path: &std::path::Path) -> (String, Transaction) {
-    let content = std::fs::read_to_string(path).unwrap_or_else(|e| {
-        eprintln!("error reading {}: {}", path.display(), e);
-        std::process::exit(1);
-    });
-    let parsed: TxJson = serde_json::from_str(&content).unwrap_or_else(|e| {
-        eprintln!("error parsing {}: {}", path.display(), e);
-        std::process::exit(1);
-    });
-    let label = parsed.label.unwrap_or_else(|| {
-        path.file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "json_tx".into())
-    });
-    (label, Transaction::new(parsed.inputs, parsed.outputs))
 }
 
 pub(crate) struct TxSpec<'a> {
@@ -205,3 +176,32 @@ pub(super) fn per_coin_summary(tag: &str, measurements: &[validation::CoinMeasur
         min / ln2
     );
 }
+
+#[derive(serde::Deserialize)]
+struct TxJson {
+    #[serde(default)]
+    label: Option<String>,
+    inputs: Vec<u64>,
+    outputs: Vec<u64>,
+}
+
+fn load_tx_json(path: &std::path::Path) -> (String, Transaction) {
+    let content = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("error reading {}: {}", path.display(), e);
+        std::process::exit(1);
+    });
+    let parsed: TxJson = serde_json::from_str(&content).unwrap_or_else(|e| {
+        eprintln!("error parsing {}: {}", path.display(), e);
+        std::process::exit(1);
+    });
+    let label = parsed.label.unwrap_or_else(|| {
+        path.file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "json_tx".into())
+    });
+    (label, Transaction::new(parsed.inputs, parsed.outputs))
+}
+
+mod analysis;
+mod compare;
+mod density;

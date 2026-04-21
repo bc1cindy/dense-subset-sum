@@ -30,6 +30,21 @@ pub fn kappa_c(x: f64) -> Option<f64> {
     Some((integral + alpha * x) / 2.0_f64.ln())
 }
 
+/// Returns (κ, κ_c, κ < κ_c).
+pub fn density_regime(a: &[u64], e_target: u64) -> Option<(f64, f64, bool)> {
+    let k = kappa(a)?;
+    let l = *a.iter().max().expect("a non-empty (kappa returned Some)") as f64;
+    let n = a.len() as f64;
+    let x = e_target as f64 / (n * l);
+
+    if x <= 0.0 || x >= 1.0 {
+        return None;
+    }
+
+    let kc = kappa_c(x)?;
+    Some((k, kc, k < kc))
+}
+
 /// Bisects α such that ∫₀¹ s/(1+e^{α·s}) ds = x. Integral is strictly decreasing in α.
 fn find_alpha(x: f64) -> Option<f64> {
     let f = |alpha: f64| -> f64 {
@@ -64,21 +79,6 @@ fn trapezoidal_integral<F: Fn(f64) -> f64>(f: F, a: f64, b: f64, n: usize) -> f6
         sum += f(a + i as f64 * h);
     }
     sum * h
-}
-
-/// Returns (κ, κ_c, κ < κ_c).
-pub fn density_regime(a: &[u64], e_target: u64) -> Option<(f64, f64, bool)> {
-    let k = kappa(a)?;
-    let l = *a.iter().max().expect("a non-empty (kappa returned Some)") as f64;
-    let n = a.len() as f64;
-    let x = e_target as f64 / (n * l);
-
-    if x <= 0.0 || x >= 1.0 {
-        return None;
-    }
-
-    let kc = kappa_c(x)?;
-    Some((k, kc, k < kc))
 }
 
 #[cfg(test)]

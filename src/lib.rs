@@ -16,7 +16,6 @@ pub mod radix;
 pub mod regime;
 pub mod sasamoto;
 pub mod stats;
-mod transaction;
 pub mod validation;
 
 pub use dense_region::find_dense_region;
@@ -38,3 +37,5 @@ pub(crate) use sasamoto::gcd_slice;
 /// One-sided Sasamoto threshold: below this |A|, the saddle approximation is
 /// unreliable and the lookup/DP path is authoritative.
 pub const SASAMOTO_MIN_N: usize = 20;
+
+mod transaction;

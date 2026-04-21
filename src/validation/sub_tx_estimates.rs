@@ -7,8 +7,6 @@ use crate::estimator::saddle_reliable;
 use crate::mappings;
 use crate::{Transaction, log_lookup_w, log_w_for_e_sat};
 
-const DEFAULT_SADDLE_TAU: f64 = 0.5;
-
 /// Two-sided ambiguity: `log_w_combined = log_w_lookup_inputs + log_w_lookup_outputs`
 /// tracks `ln(count)` for balanced Maurer 2-partition mappings.
 #[derive(Debug, Clone)]
@@ -91,6 +89,8 @@ pub fn estimate_sub_txs(tx: &Transaction, lookup_k: usize) -> Vec<SubTxEstimate>
     }
     estimates
 }
+
+const DEFAULT_SADDLE_TAU: f64 = 0.5;
 
 #[cfg(test)]
 mod tests {

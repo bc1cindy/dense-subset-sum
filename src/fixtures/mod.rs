@@ -5,10 +5,6 @@
 //! - `wasabi2_positive`: 30 manually-bucketed Wasabi 2 CoinJoins (positive samples).
 //! - `wasabi2_false`: Wasabi 2 lookalikes (negative samples, consolidations + stdenom).
 
-mod sets;
-mod wasabi2_false;
-mod wasabi2_positive;
-
 pub use sets::*;
 pub use wasabi2_false::*;
 pub use wasabi2_positive::*;
@@ -31,3 +27,7 @@ pub fn all_comparison_sets() -> Vec<(&'static str, Vec<u64>)> {
     }
     sets
 }
+
+mod sets;
+mod wasabi2_false;
+mod wasabi2_positive;

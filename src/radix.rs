@@ -3,10 +3,6 @@
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
-/// 20_999_999.9769 BTC · 10⁸ sat/BTC. Upper bound for the two denomination
-/// series; values above are unreachable on-chain.
-const MAX_MONEY_SATS: u64 = 2_099_999_997_690_000;
-
 /// Preferred-value denominations everyone is likely to pick. Static lookup,
 /// not a computed Hamming-weight function: HW has false positives (e.g.
 /// 0xE0 = 128+64+32) and doesn't extend to the 1-2-5 decimal engineering
@@ -44,6 +40,10 @@ pub static DISTINGUISHED: LazyLock<HashSet<u64>> = LazyLock::new(|| {
 pub fn is_distinguished(v: u64) -> bool {
     DISTINGUISHED.contains(&v)
 }
+
+/// 20_999_999.9769 BTC · 10⁸ sat/BTC. Upper bound for the two denomination
+/// series; values above are unreachable on-chain.
+const MAX_MONEY_SATS: u64 = 2_099_999_997_690_000;
 
 #[cfg(test)]
 mod tests {

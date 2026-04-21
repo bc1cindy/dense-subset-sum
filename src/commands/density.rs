@@ -1,8 +1,8 @@
 //! κ/κ_c regime tooling, target sweeps, and subset-size density sweeps.
 
 use dense_subset_sum::{
-    LookupConfig, density_regime, empirical_regime, estimator, find_dense_region, fixtures,
-    kappa, kappa_c, log_w_for_e, n_c, sumset_size_with_config, validation,
+    LookupConfig, density_regime, empirical_regime, estimator, find_dense_region, fixtures, kappa,
+    kappa_c, log_w_for_e, n_c, sumset_size_with_config, validation,
 };
 
 use super::{TxSpec, parse_values, parse_values_f64, resolve_tx, resolve_values};

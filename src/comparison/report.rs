@@ -5,13 +5,6 @@ use super::core::{
     classify_regime,
 };
 
-/// Console rendering budget: above this row count the printer switches to a
-/// head/median/tail preview (see `PREVIEW_HEAD` / `PREVIEW_TAIL`) instead of
-/// dumping every row. Use `print_report_csv` for the full table.
-const MAX_PRINTED_ROWS: usize = 30;
-const PREVIEW_HEAD: usize = 10;
-const PREVIEW_TAIL: usize = 10;
-
 pub fn print_report(report: &ComparisonReport) {
     let k_str = report
         .kappa
@@ -135,17 +128,6 @@ pub fn print_report(report: &ComparisonReport) {
     }
 }
 
-fn print_summary_line(s: &EstimatorSummary) {
-    println!(
-        "  {:<15} pts={:<4} median_err={:.1}%  max_err={:.1}%  spearman={:.4}",
-        s.name,
-        s.n_points,
-        s.median_error * 100.0,
-        s.max_error * 100.0,
-        s.spearman,
-    );
-}
-
 pub fn print_report_csv(report: &ComparisonReport) {
     println!("# {}", report.label);
     println!("E,W_exact,W_sasamoto,W_lookup,W_dp,err_sas,err_lkp,err_dp");
@@ -187,4 +169,22 @@ pub fn print_batch_summary(rows: &[BatchRow]) {
             row.avg_lkp_spearman,
         );
     }
+}
+
+/// Console rendering budget: above this row count the printer switches to a
+/// head/median/tail preview (see `PREVIEW_HEAD` / `PREVIEW_TAIL`) instead of
+/// dumping every row. Use `print_report_csv` for the full table.
+const MAX_PRINTED_ROWS: usize = 30;
+const PREVIEW_HEAD: usize = 10;
+const PREVIEW_TAIL: usize = 10;
+
+fn print_summary_line(s: &EstimatorSummary) {
+    println!(
+        "  {:<15} pts={:<4} median_err={:.1}%  max_err={:.1}%  spearman={:.4}",
+        s.name,
+        s.n_points,
+        s.median_error * 100.0,
+        s.max_error * 100.0,
+        s.spearman,
+    );
 }

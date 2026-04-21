@@ -13,23 +13,6 @@ pub struct DenseRegion {
     pub log_w_safe: f64,
 }
 
-/// Scan E in `n_steps` uniform points across (0, Σaⱼ).
-fn scan(a: &[f64], min_log_w: f64, n_steps: usize) -> Vec<(f64, f64)> {
-    let e_max: f64 = a.iter().sum();
-    let mut pts: Vec<(f64, f64)> = (1..n_steps)
-        .filter_map(|i| {
-            let e = e_max * i as f64 / n_steps as f64;
-            let lw = log_w_for_e(a, e)?;
-            if lw >= min_log_w { Some((e, lw)) } else { None }
-        })
-        .collect();
-    pts.sort_by(|a, b| {
-        b.1.partial_cmp(&a.1)
-            .expect("log_w_for_e never returns NaN")
-    });
-    pts
-}
-
 /// Safe point is the center of [e_lo, e_hi] — maximally far from threshold edges.
 pub fn find_dense_region(a: &[f64], min_log_w: f64, n_steps: usize) -> Option<DenseRegion> {
     let pts = scan(a, min_log_w, n_steps);
@@ -61,4 +44,21 @@ pub fn find_dense_region(a: &[f64], min_log_w: f64, n_steps: usize) -> Option<De
         e_safe,
         log_w_safe,
     })
+}
+
+/// Scan E in `n_steps` uniform points across (0, Σaⱼ).
+fn scan(a: &[f64], min_log_w: f64, n_steps: usize) -> Vec<(f64, f64)> {
+    let e_max: f64 = a.iter().sum();
+    let mut pts: Vec<(f64, f64)> = (1..n_steps)
+        .filter_map(|i| {
+            let e = e_max * i as f64 / n_steps as f64;
+            let lw = log_w_for_e(a, e)?;
+            if lw >= min_log_w { Some((e, lw)) } else { None }
+        })
+        .collect();
+    pts.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .expect("log_w_for_e never returns NaN")
+    });
+    pts
 }

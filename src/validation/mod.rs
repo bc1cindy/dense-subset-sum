@@ -1,10 +1,5 @@
 //! Cross-validation of estimators against brute force and CJA mappings.
 
-mod density_sweep;
-mod mappings_pipeline;
-mod per_coin;
-mod sub_tx_estimates;
-
 pub use density_sweep::{SubsetDensityPoint, print_subset_density_sweep, subset_density_sweep};
 pub use mappings_pipeline::{
     FeeHandling, MappingComparison, MappingCorrelation, ValidationSummary, compare_w_vs_mappings,
@@ -26,6 +21,11 @@ pub(super) fn exclude_values(full: &[u64], to_remove: &[u64]) -> Vec<u64> {
     }
     remaining
 }
+
+mod density_sweep;
+mod mappings_pipeline;
+mod per_coin;
+mod sub_tx_estimates;
 
 #[cfg(test)]
 mod tests {
