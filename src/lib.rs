@@ -12,6 +12,7 @@ pub mod radix;
 pub mod regime;
 pub mod sasamoto;
 pub mod stats;
+pub mod validation;
 
 pub use dense_region::find_dense_region;
 pub use empirical_regime::{EmpiricalRegime, empirical_regime};
