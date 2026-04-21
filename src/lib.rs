@@ -3,6 +3,7 @@
 //! W(E) = number of input subsets that sum to E. Provides exact (DP),
 //! lookup lower-bound, and Sasamoto asymptotic estimators.
 
+pub mod comparison;
 pub mod dense_region;
 pub mod empirical_regime;
 pub mod estimator;
@@ -29,6 +30,8 @@ pub use radix::{DISTINGUISHED, is_distinguished};
 pub use regime::{density_regime, kappa, kappa_c};
 pub use sasamoto::{log_w_for_e, log_w_for_e_sat, log_w_signed_sasamoto, n_c};
 pub use transaction::Transaction;
+
+pub(crate) use sasamoto::gcd_slice;
 
 /// One-sided Sasamoto threshold: below this |A|, the saddle approximation is
 /// unreliable and the lookup/DP path is authoritative.
