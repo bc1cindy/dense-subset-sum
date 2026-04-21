@@ -90,123 +90,6 @@ pub fn compare(
     )
 }
 
-/// Shared body for `compare` and `compare_monte_carlo`.
-///
-/// `counts[e]` is the number of subsets observed summing to `e`. The estimated
-/// `W(e)` is `counts[e] * scale`: exhaustive passes `scale=1.0` so `w_exact`
-/// stays integer-valued; MC passes `2^N / samples_drawn` to extrapolate.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn build_report_from_counts(
-    a: &[u64],
-    counts: &HashMap<u64, u64>,
-    scale: f64,
-    min_count: u64,
-    lookup_k: usize,
-    dp_max: usize,
-    label: &str,
-    mode: CompareMode,
-) -> ComparisonReport {
-    let n = a.len();
-    let e_max: u64 = a.iter().sum();
-    let k = kappa(a);
-
-    let mut targets: Vec<(u64, u64)> = counts
-        .iter()
-        .filter(|&(&e, &c)| c >= min_count && e > 0 && e < e_max)
-        .map(|(&e, &c)| (e, c))
-        .collect();
-    targets.sort_by_key(|&(e, _)| e);
-
-    let mut rows: Vec<ComparisonRow> = Vec::new();
-    let mut sas_points: Vec<(f64, f64)> = Vec::new();
-    let mut lkp_points: Vec<(f64, f64)> = Vec::new();
-    let mut dp_points: Vec<(f64, f64)> = Vec::new();
-
-    for &(e, c) in &targets {
-        let w_ref = c as f64 * scale;
-        let w_sas = log_w_for_e_sat(a, e).map(|lw| lw.exp());
-        let w_lkp = lookup_w(a, e, lookup_k);
-        let w_dp = dp_w(a, e, dp_max);
-
-        let err_sas = w_sas.map(|ws| (ws - w_ref) / w_ref);
-        let err_lkp = w_lkp.map(|wl| (wl as f64 - w_ref) / w_ref);
-        let err_dp = w_dp.map(|wd| (wd as f64 - w_ref) / w_ref);
-
-        if let Some(ws) = w_sas {
-            sas_points.push((ws, w_ref));
-        }
-        if let Some(wl) = w_lkp {
-            lkp_points.push((wl as f64, w_ref));
-        }
-        if let Some(wd) = w_dp {
-            dp_points.push((wd as f64, w_ref));
-        }
-
-        rows.push(ComparisonRow {
-            e_target: e,
-            w_exact: w_ref,
-            w_sasamoto: w_sas,
-            w_lookup: w_lkp,
-            w_dp,
-            err_sasamoto: err_sas,
-            err_lookup: err_lkp,
-            err_dp,
-        });
-    }
-
-    let sasamoto = make_summary(
-        "sasamoto",
-        &sas_points,
-        &rows
-            .iter()
-            .filter_map(|r| r.err_sasamoto)
-            .collect::<Vec<_>>(),
-    );
-    let lookup = make_summary(
-        &format!("lookup_k{}", lookup_k),
-        &lkp_points,
-        &rows.iter().filter_map(|r| r.err_lookup).collect::<Vec<_>>(),
-    );
-    let dp = make_summary(
-        "dp",
-        &dp_points,
-        &rows.iter().filter_map(|r| r.err_dp).collect::<Vec<_>>(),
-    );
-
-    ComparisonReport {
-        label: label.to_string(),
-        n,
-        values: a.to_vec(),
-        kappa: k,
-        rows,
-        sasamoto,
-        lookup,
-        dp,
-        mode,
-    }
-}
-
-pub(super) fn make_summary(name: &str, points: &[(f64, f64)], errors: &[f64]) -> EstimatorSummary {
-    let abs_errors: Vec<f64> = errors.iter().map(|e| e.abs()).collect();
-    let median_error = median(&abs_errors);
-    let max_error = errors.iter().map(|e| e.abs()).fold(0.0_f64, f64::max);
-    let spearman = if points.len() >= 3 {
-        let x: Vec<f64> = points.iter().map(|p| p.0).collect();
-        let y: Vec<f64> = points.iter().map(|p| p.1).collect();
-        spearman_correlation(&x, &y)
-    } else {
-        f64::NAN
-    };
-
-    EstimatorSummary {
-        name: name.to_string(),
-        n_points: points.len(),
-        median_error,
-        max_error,
-        spearman,
-    }
-}
-
 /// Which estimators are ground truth vs. asymptotic diagnostic for a given (N, W range).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompareRegime {
@@ -403,5 +286,122 @@ pub fn aggregate_reports(reports: &[ComparisonReport], config: &str) -> BatchRow
             .iter()
             .map(|r| r.lookup.spearman)
             .collect::<Vec<_>>()),
+    }
+}
+
+/// Shared body for `compare` and `compare_monte_carlo`.
+///
+/// `counts[e]` is the number of subsets observed summing to `e`. The estimated
+/// `W(e)` is `counts[e] * scale`: exhaustive passes `scale=1.0` so `w_exact`
+/// stays integer-valued; MC passes `2^N / samples_drawn` to extrapolate.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn build_report_from_counts(
+    a: &[u64],
+    counts: &HashMap<u64, u64>,
+    scale: f64,
+    min_count: u64,
+    lookup_k: usize,
+    dp_max: usize,
+    label: &str,
+    mode: CompareMode,
+) -> ComparisonReport {
+    let n = a.len();
+    let e_max: u64 = a.iter().sum();
+    let k = kappa(a);
+
+    let mut targets: Vec<(u64, u64)> = counts
+        .iter()
+        .filter(|&(&e, &c)| c >= min_count && e > 0 && e < e_max)
+        .map(|(&e, &c)| (e, c))
+        .collect();
+    targets.sort_by_key(|&(e, _)| e);
+
+    let mut rows: Vec<ComparisonRow> = Vec::new();
+    let mut sas_points: Vec<(f64, f64)> = Vec::new();
+    let mut lkp_points: Vec<(f64, f64)> = Vec::new();
+    let mut dp_points: Vec<(f64, f64)> = Vec::new();
+
+    for &(e, c) in &targets {
+        let w_ref = c as f64 * scale;
+        let w_sas = log_w_for_e_sat(a, e).map(|lw| lw.exp());
+        let w_lkp = lookup_w(a, e, lookup_k);
+        let w_dp = dp_w(a, e, dp_max);
+
+        let err_sas = w_sas.map(|ws| (ws - w_ref) / w_ref);
+        let err_lkp = w_lkp.map(|wl| (wl as f64 - w_ref) / w_ref);
+        let err_dp = w_dp.map(|wd| (wd as f64 - w_ref) / w_ref);
+
+        if let Some(ws) = w_sas {
+            sas_points.push((ws, w_ref));
+        }
+        if let Some(wl) = w_lkp {
+            lkp_points.push((wl as f64, w_ref));
+        }
+        if let Some(wd) = w_dp {
+            dp_points.push((wd as f64, w_ref));
+        }
+
+        rows.push(ComparisonRow {
+            e_target: e,
+            w_exact: w_ref,
+            w_sasamoto: w_sas,
+            w_lookup: w_lkp,
+            w_dp,
+            err_sasamoto: err_sas,
+            err_lookup: err_lkp,
+            err_dp,
+        });
+    }
+
+    let sasamoto = make_summary(
+        "sasamoto",
+        &sas_points,
+        &rows
+            .iter()
+            .filter_map(|r| r.err_sasamoto)
+            .collect::<Vec<_>>(),
+    );
+    let lookup = make_summary(
+        &format!("lookup_k{}", lookup_k),
+        &lkp_points,
+        &rows.iter().filter_map(|r| r.err_lookup).collect::<Vec<_>>(),
+    );
+    let dp = make_summary(
+        "dp",
+        &dp_points,
+        &rows.iter().filter_map(|r| r.err_dp).collect::<Vec<_>>(),
+    );
+
+    ComparisonReport {
+        label: label.to_string(),
+        n,
+        values: a.to_vec(),
+        kappa: k,
+        rows,
+        sasamoto,
+        lookup,
+        dp,
+        mode,
+    }
+}
+
+pub(super) fn make_summary(name: &str, points: &[(f64, f64)], errors: &[f64]) -> EstimatorSummary {
+    let abs_errors: Vec<f64> = errors.iter().map(|e| e.abs()).collect();
+    let median_error = median(&abs_errors);
+    let max_error = errors.iter().map(|e| e.abs()).fold(0.0_f64, f64::max);
+    let spearman = if points.len() >= 3 {
+        let x: Vec<f64> = points.iter().map(|p| p.0).collect();
+        let y: Vec<f64> = points.iter().map(|p| p.1).collect();
+        spearman_correlation(&x, &y)
+    } else {
+        f64::NAN
+    };
+
+    EstimatorSummary {
+        name: name.to_string(),
+        n_points: points.len(),
+        median_error,
+        max_error,
+        spearman,
     }
 }
