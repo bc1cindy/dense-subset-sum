@@ -49,67 +49,6 @@ pub fn per_coin_measurements_fee_aware(
     per_coin_measurements_inner(tx, lookup_k, method, true)
 }
 
-fn per_coin_measurements_inner(
-    tx: &Transaction,
-    lookup_k: usize,
-    method: SignedMethod,
-    fee_aware: bool,
-) -> Vec<CoinMeasurement> {
-    let total = tx.inputs.len() + tx.outputs.len();
-    let mut measurements = Vec::with_capacity(total);
-
-    let fee = tx.input_sum().saturating_sub(tx.output_sum());
-    let input_sum = tx.input_sum();
-
-    let n_in = tx.inputs.len() as f64;
-    let l_in = tx.inputs.iter().copied().max().unwrap_or(0) as f64;
-    let kappa_c_at = |value: u64| -> Option<f64> {
-        if n_in <= 0.0 || l_in <= 0.0 {
-            return None;
-        }
-        kappa_c(value as f64 / (n_in * l_in))
-    };
-
-    for (i, &value) in tx.inputs.iter().enumerate() {
-        let other_inputs = exclude_values(&tx.inputs, &[value]);
-        let other_outputs = tx.outputs.clone();
-
-        let target = if fee_aware && fee > 0 && input_sum > 0 {
-            let fee_share = (fee as f64 * value as f64 / input_sum as f64).round() as i64;
-            (value as i64).saturating_sub(fee_share)
-        } else {
-            value as i64
-        };
-
-        let log_w_signed = log_w_signed(&other_outputs, &other_inputs, target, lookup_k, method);
-        measurements.push(CoinMeasurement {
-            role: CoinRole::Input,
-            index: i,
-            value,
-            log_w_signed,
-            n_other_coins: other_inputs.len() + other_outputs.len(),
-            kappa_c_at_value: kappa_c_at(value),
-        });
-    }
-
-    for (i, &value) in tx.outputs.iter().enumerate() {
-        let other_inputs = tx.inputs.clone();
-        let other_outputs = exclude_values(&tx.outputs, &[value]);
-        let target = value as i64;
-        let log_w_signed = log_w_signed(&other_inputs, &other_outputs, target, lookup_k, method);
-        measurements.push(CoinMeasurement {
-            role: CoinRole::Output,
-            index: i,
-            value,
-            log_w_signed,
-            n_other_coins: other_inputs.len() + other_outputs.len(),
-            kappa_c_at_value: kappa_c_at(value),
-        });
-    }
-
-    measurements
-}
-
 pub fn print_per_coin_measurements(
     label: &str,
     tx: &Transaction,
@@ -171,6 +110,67 @@ pub fn print_per_coin_measurements(
         large_out,
         n_out
     );
+}
+
+fn per_coin_measurements_inner(
+    tx: &Transaction,
+    lookup_k: usize,
+    method: SignedMethod,
+    fee_aware: bool,
+) -> Vec<CoinMeasurement> {
+    let total = tx.inputs.len() + tx.outputs.len();
+    let mut measurements = Vec::with_capacity(total);
+
+    let fee = tx.input_sum().saturating_sub(tx.output_sum());
+    let input_sum = tx.input_sum();
+
+    let n_in = tx.inputs.len() as f64;
+    let l_in = tx.inputs.iter().copied().max().unwrap_or(0) as f64;
+    let kappa_c_at = |value: u64| -> Option<f64> {
+        if n_in <= 0.0 || l_in <= 0.0 {
+            return None;
+        }
+        kappa_c(value as f64 / (n_in * l_in))
+    };
+
+    for (i, &value) in tx.inputs.iter().enumerate() {
+        let other_inputs = exclude_values(&tx.inputs, &[value]);
+        let other_outputs = tx.outputs.clone();
+
+        let target = if fee_aware && fee > 0 && input_sum > 0 {
+            let fee_share = (fee as f64 * value as f64 / input_sum as f64).round() as i64;
+            (value as i64).saturating_sub(fee_share)
+        } else {
+            value as i64
+        };
+
+        let log_w_signed = log_w_signed(&other_outputs, &other_inputs, target, lookup_k, method);
+        measurements.push(CoinMeasurement {
+            role: CoinRole::Input,
+            index: i,
+            value,
+            log_w_signed,
+            n_other_coins: other_inputs.len() + other_outputs.len(),
+            kappa_c_at_value: kappa_c_at(value),
+        });
+    }
+
+    for (i, &value) in tx.outputs.iter().enumerate() {
+        let other_inputs = tx.inputs.clone();
+        let other_outputs = exclude_values(&tx.outputs, &[value]);
+        let target = value as i64;
+        let log_w_signed = log_w_signed(&other_inputs, &other_outputs, target, lookup_k, method);
+        measurements.push(CoinMeasurement {
+            role: CoinRole::Output,
+            index: i,
+            value,
+            log_w_signed,
+            n_other_coins: other_inputs.len() + other_outputs.len(),
+            kappa_c_at_value: kappa_c_at(value),
+        });
+    }
+
+    measurements
 }
 
 #[cfg(test)]
