@@ -246,6 +246,7 @@ fn gcd(a: u64, b: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fixtures;
     use crate::lookup::log_lookup_w_signed_target_aware;
 
     /// W(E) = C(N, E) when all aⱼ = 1 (paper §6, β = ln(N/E - 1)).
@@ -425,6 +426,14 @@ mod tests {
     #[test]
     fn test_log_w_for_e_sat_all_zeros_returns_none() {
         assert!(log_w_for_e_sat(&[0, 0, 0], 0).is_none());
+    }
+
+    #[test]
+    fn test_equal_denominations_gcd() {
+        let tx = fixtures::equal_denominations();
+        assert_eq!(tx.fee(), 0);
+        let all_values: Vec<u64> = tx.inputs.iter().chain(tx.outputs.iter()).copied().collect();
+        assert_eq!(gcd_slice(&all_values), 50_000);
     }
 
     #[test]
