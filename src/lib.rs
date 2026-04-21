@@ -6,6 +6,7 @@
 pub mod dense_region;
 pub mod empirical_regime;
 pub mod estimator;
+pub mod fixtures;
 pub mod lookup;
 pub mod mappings;
 pub mod penalty;
