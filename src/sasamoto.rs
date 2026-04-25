@@ -59,6 +59,33 @@ pub fn log_w_for_m_e_sat(a: &[u64], m_target: usize, e_target: u64) -> f64 {
     }
 }
 
+/// Sasamoto critical subset size N_c(A) = ½·log₂(π/2·Σaⱼ²) (appendix A.7);
+/// callers gate W-based terms off when N is not ≫ N_c. Eq (A.7) assumes
+/// gcd(A) = 1, so A is gcd-normalized internally. `None` on empty/all-zero
+/// fails the gate closed.
+pub fn n_c(a: &[u64]) -> Option<f64> {
+    let g = gcd_slice(a)?;
+    let sum_sq: f64 = a.iter().map(|&v| ((v / g) as f64).powi(2)).sum();
+    Some(0.5 * (PI * 0.5 * sum_sq).log2())
+}
+
+/// Per-query critical N for eq (5.8): below it, the constrained asymptotic is
+/// unreliable for this (m, e). Compares against a.len() like [`n_c`]; derived
+/// from log W(M, E) at the saddle (paper §5 + appendix A.7). `None` on
+/// degenerate or infeasible inputs.
+pub fn n_c_for_m_e(a: &[u64], m: usize, e: u64) -> Option<f64> {
+    let g = gcd_slice(a)?;
+    let (a_norm, e_norm) = divide_by_gcd(a, e, g)?;
+    let (e_min, e_max) = feasibility_bounds(&a_norm, m)?;
+    if e_norm <= e_min || e_norm >= e_max {
+        return None;
+    }
+    let m_f = m as f64;
+    let (beta, mu) = find_beta_mu(&a_norm, m_f, e_norm);
+    let log_w = log_w_grand(&a_norm, beta, mu, m_f, e_norm);
+    Some(a.len() as f64 - log_w / std::f64::consts::LN_2)
+}
+
 /// Sum interval (Σ smallest m, Σ largest m) for size-m subsets of `a`.
 /// `None` when m is 0 or ≥ a.len().
 fn feasibility_bounds(a: &[f64], m_target: usize) -> Option<(f64, f64)> {
@@ -791,5 +818,104 @@ mod tests {
     #[should_panic(expected = "nonzero")]
     fn test_log_w_for_m_e_sat_panics_on_all_zeros() {
         log_w_for_m_e_sat(&[0, 0, 0], 1, 0);
+    }
+
+    #[test]
+    fn test_n_c_closed_form_all_ones() {
+        let a = vec![1u64; 10];
+        let expected = 0.5 * (PI * 0.5 * 10.0).log2();
+        let got = n_c(&a).unwrap();
+        assert!((got - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_n_c_scale_invariant() {
+        let a = vec![3u64, 7, 11, 13, 17];
+        let scaled: Vec<u64> = a.iter().map(|&v| v * 100).collect();
+        let n1 = n_c(&a).unwrap();
+        let n2 = n_c(&scaled).unwrap();
+        assert!((n1 - n2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_n_c_degenerate() {
+        assert!(n_c(&[]).is_none());
+        assert!(n_c(&[0, 0, 0]).is_none());
+    }
+
+    #[test]
+    fn test_n_c_for_m_e_finite_at_central_query() {
+        let a: Vec<u64> = (1..=20).collect();
+        let nc = n_c_for_m_e(&a, 10, 105).unwrap();
+        assert!(nc.is_finite());
+        assert!((a.len() as f64) > nc);
+    }
+
+    #[test]
+    fn test_n_c_for_m_e_grows_at_tight_m() {
+        let a: Vec<u64> = (1..=20).collect();
+        let n_c_unconstrained = n_c(&a).unwrap();
+        let n_c_tight = n_c_for_m_e(&a, 2, 5).unwrap();
+        assert!(n_c_tight > n_c_unconstrained + 5.0);
+    }
+
+    #[test]
+    fn test_n_c_for_m_e_scale_invariant() {
+        let a = vec![3u64, 7, 11, 13, 17];
+        let scaled: Vec<u64> = a.iter().map(|&v| v * 100).collect();
+        let n1 = n_c_for_m_e(&a, 2, 18).unwrap();
+        let n2 = n_c_for_m_e(&scaled, 2, 1800).unwrap();
+        assert!((n1 - n2).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_n_c_for_m_e_degenerate() {
+        assert!(n_c_for_m_e(&[], 0, 10).is_none());
+        assert!(n_c_for_m_e(&[0, 0, 0], 1, 0).is_none());
+        assert!(n_c_for_m_e(&[10, 20, 30], 1, 7).is_none());
+        assert!(n_c_for_m_e(&[1, 2, 3], 0, 5).is_none());
+        assert!(n_c_for_m_e(&[1, 2, 3], 3, 5).is_none());
+        assert!(n_c_for_m_e(&[1, 2, 3], 2, 100).is_none());
+    }
+
+    #[test]
+    fn test_n_c_for_m_e_predicts_reliable_regime() {
+        let a: Vec<u64> = (1..=20).collect();
+        let m = 5;
+        let e = 30;
+        let nc = n_c_for_m_e(&a, m, e).unwrap();
+        let n = a.len() as f64;
+        if n > nc {
+            let n_size = a.len();
+            let mut exact = 0u64;
+            for mask in 0..(1u64 << n_size) {
+                if mask.count_ones() as usize != m {
+                    continue;
+                }
+                let sum: u64 = (0..n_size)
+                    .filter(|&j| mask & (1 << j) != 0)
+                    .map(|j| a[j])
+                    .sum();
+                if sum == e {
+                    exact += 1;
+                }
+            }
+            let approx = log_w_for_m_e_sat(&a, m, e).exp();
+            let err = (approx - exact as f64).abs() / exact as f64;
+            assert!(err < 0.30, "err = {}", err);
+        }
+    }
+
+    #[test]
+    fn test_n_c_for_m_e_conservative_near_boundary() {
+        let a: Vec<u64> = (1..=20).collect();
+        let nc_near = n_c_for_m_e(&a, 2, 4);
+        let nc_central = n_c_for_m_e(&a, 2, 21).unwrap();
+        assert!(
+            nc_near.is_none_or(|t| t >= nc_central),
+            "near={:?}, central={}",
+            nc_near,
+            nc_central
+        );
     }
 }
