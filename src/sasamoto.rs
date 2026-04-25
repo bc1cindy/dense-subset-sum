@@ -25,6 +25,17 @@ pub fn log_w_for_e(a: &[f64], e_target: f64) -> f64 {
     log_w(a, beta)
 }
 
+/// u64/satoshi entry: gcd-normalizes A and E, then dispatches to [`log_w_for_e`].
+/// Paper (note after eq 3.6) assumes gcd(A) = 1; satoshi inputs rarely satisfy
+/// it. Returns `NEG_INFINITY` when E is not a multiple of gcd(A).
+/// Panics if A is empty/all-zero or (after normalization) E ∉ (0, Σaⱼ).
+pub fn log_w_for_e_sat(a: &[u64], e_target: u64) -> f64 {
+    match gcd_normalize(a, e_target) {
+        Some((a_norm, e_norm)) => log_w_for_e(&a_norm, e_norm),
+        None => f64::NEG_INFINITY,
+    }
+}
+
 /// Natural log of the count of subsets of `a` of size exactly `m_target`
 /// summing to `e_target` (eq 5.8). Companion to [`log_w_for_e`]: saddle is
 /// 2D in (β, μ), Gaussian width is √det(D) from eq 5.9.
@@ -35,6 +46,17 @@ pub fn log_w_for_m_e(a: &[f64], m_target: usize, e_target: f64) -> f64 {
     let m = m_target as f64;
     let (beta, mu) = find_beta_mu(a, m, e_target);
     log_w_grand(a, beta, mu, m, e_target)
+}
+
+/// u64/satoshi companion to [`log_w_for_m_e`]. Same gcd normalization as
+/// [`log_w_for_e_sat`]; see its doc for the paper §3 motivation.
+/// Panics if A is empty/all-zero or `(m_target, e_target/gcd)` is outside the
+/// feasibility interior.
+pub fn log_w_for_m_e_sat(a: &[u64], m_target: usize, e_target: u64) -> f64 {
+    match gcd_normalize(a, e_target) {
+        Some((a_norm, e_norm)) => log_w_for_m_e(&a_norm, m_target, e_norm),
+        None => f64::NEG_INFINITY,
+    }
 }
 
 /// Sum interval (Σ smallest m, Σ largest m) for size-m subsets of `a`.
@@ -64,6 +86,38 @@ fn feasibility_assert(a: &[f64], m_target: usize, e_target: f64) {
         e_max,
         m_target
     );
+}
+
+pub(crate) fn gcd_slice(vals: &[u64]) -> Option<u64> {
+    let g = vals.iter().copied().fold(0, gcd);
+    if g == 0 { None } else { Some(g) }
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    let (mut a, mut b) = (a, b);
+    while b != 0 {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    a
+}
+
+/// Divides A and `e` by a known `g`. `None` when E is not a multiple of g.
+fn divide_by_gcd(a: &[u64], e: u64, g: u64) -> Option<(Vec<f64>, f64)> {
+    if !e.is_multiple_of(g) {
+        return None;
+    }
+    let a_norm: Vec<f64> = a.iter().map(|&v| (v / g) as f64).collect();
+    Some((a_norm, (e / g) as f64))
+}
+
+/// Divides A and `e` by gcd(A) per paper §3 (non-degenerate saddle).
+/// `None` when `e` is not a multiple of gcd(A); panics if A contains no
+/// nonzero value.
+fn gcd_normalize(a: &[u64], e: u64) -> Option<(Vec<f64>, f64)> {
+    let g = gcd_slice(a).expect("a must contain at least one nonzero value");
+    divide_by_gcd(a, e, g)
 }
 
 /// Bisects β such that ⟨E⟩(β, μ) = e_target (eqs 3.10/5.4); ⟨E⟩ is strictly
@@ -536,5 +590,206 @@ mod tests {
             let diff = (lw - lw_comp).abs();
             prop_assert!(diff < 1e-6, "diff = {}, lw = {}, lw_comp = {}", diff, lw, lw_comp);
         }
+
+        /// log W(c·a, c·e) = log W(a, e): gcd-normalization quotients out
+        /// any common scale c.
+        #[test]
+        fn log_w_for_e_sat_scale_invariant(
+            a in proptest::collection::vec(1u64..100, 8..30),
+            e_frac in 0.05f64..0.95,
+            scale in 2u64..1000,
+        ) {
+            let total: u64 = a.iter().sum();
+            prop_assume!(total > 2);
+            let e = ((total as f64) * e_frac) as u64;
+            prop_assume!(e > 0 && e < total);
+
+            let lw_base = log_w_for_e_sat(&a, e);
+            prop_assume!(lw_base.is_finite());
+
+            let a_scaled: Vec<u64> = a.iter().map(|&v| v * scale).collect();
+            let lw_scaled = log_w_for_e_sat(&a_scaled, e * scale);
+
+            prop_assert!(
+                (lw_base - lw_scaled).abs() < 1e-10,
+                "base={}, scaled={}, scale={}",
+                lw_base, lw_scaled, scale
+            );
+        }
+
+        /// log W(c·a, m, c·e) = log W(a, m, e): gcd-normalization quotients
+        /// out any common scale c.
+        #[test]
+        fn log_w_for_m_e_sat_scale_invariant(
+            a in proptest::collection::vec(1u64..100, 8..18),
+            m_frac in 0.3f64..0.5,
+            e_frac in 0.3f64..0.7,
+            scale in 2u64..1000,
+        ) {
+            let n = a.len();
+            let m = ((n as f64) * m_frac).round() as usize;
+            prop_assume!(m >= 2 && m + 2 <= n);
+
+            let mut sorted = a.clone();
+            sorted.sort();
+            let e_min: u64 = sorted.iter().take(m).sum();
+            let e_max: u64 = sorted.iter().rev().take(m).sum();
+            prop_assume!(e_max > e_min + 2);
+            let span = (e_max - e_min) as f64;
+            let e = e_min + (span * e_frac) as u64;
+            prop_assume!(e > e_min && e < e_max);
+
+            let lw_base = log_w_for_m_e_sat(&a, m, e);
+            prop_assume!(lw_base.is_finite());
+
+            let a_scaled: Vec<u64> = a.iter().map(|&v| v * scale).collect();
+            let lw_scaled = log_w_for_m_e_sat(&a_scaled, m, e * scale);
+
+            prop_assert!(
+                (lw_base - lw_scaled).abs() < 1e-10,
+                "base={}, scaled={}, scale={}",
+                lw_base, lw_scaled, scale
+            );
+        }
+    }
+
+    #[test]
+    fn test_gcd_normalization() {
+        let a_base: Vec<u64> = vec![3, 7, 11, 5, 9];
+        let a_scaled: Vec<u64> = a_base.iter().map(|&v| v * 100).collect();
+        let lw_base = log_w_for_e_sat(&a_base, 15);
+        let lw_scaled = log_w_for_e_sat(&a_scaled, 1500);
+        assert!(
+            (lw_base - lw_scaled).abs() < 1e-10,
+            "base={} scaled={}",
+            lw_base,
+            lw_scaled
+        );
+    }
+
+    #[test]
+    fn test_gcd_indivisible() {
+        let a: Vec<u64> = vec![10, 20, 30, 40];
+        let lw = log_w_for_e_sat(&a, 15);
+        assert!(lw == f64::NEG_INFINITY, "expected -inf, got {}", lw);
+    }
+
+    #[test]
+    fn test_u64_vs_brute_force() {
+        let a: Vec<u64> = (1..=20).collect();
+        let n = a.len();
+        let e_max: u64 = a.iter().sum();
+
+        let mut w_exact = std::collections::HashMap::new();
+        for mask in 0..(1u64 << n) {
+            let sum: u64 = (0..n).filter(|&j| mask & (1 << j) != 0).map(|j| a[j]).sum();
+            *w_exact.entry(sum).or_insert(0u64) += 1;
+        }
+
+        let mut tested = 0;
+        for (&e, &w) in &w_exact {
+            if w < W_MIN_FOR_ASYMPTOTIC_MATCH || e == 0 || e >= e_max {
+                continue;
+            }
+            let lw = log_w_for_e_sat(&a, e);
+            let err = (lw.exp() - w as f64).abs() / w as f64;
+            assert!(
+                err < 0.20,
+                "E={}: exact={}, approx={:.1}, err={:.1}%",
+                e,
+                w,
+                lw.exp(),
+                err * 100.0
+            );
+            tested += 1;
+        }
+        assert!(tested > 20, "tested only {} cells", tested);
+    }
+
+    #[test]
+    #[should_panic(expected = "nonzero")]
+    fn test_log_w_for_e_sat_panics_on_empty() {
+        log_w_for_e_sat(&[], 10);
+    }
+
+    #[test]
+    #[should_panic(expected = "nonzero")]
+    fn test_log_w_for_e_sat_panics_on_all_zeros() {
+        log_w_for_e_sat(&[0, 0, 0], 0);
+    }
+
+    #[test]
+    fn test_gcd_normalization_constrained() {
+        let a_base: Vec<u64> = vec![3, 7, 11, 5, 9];
+        let a_scaled: Vec<u64> = a_base.iter().map(|&v| v * 100).collect();
+        let lw_base = log_w_for_m_e_sat(&a_base, 2, 15);
+        let lw_scaled = log_w_for_m_e_sat(&a_scaled, 2, 1500);
+        assert!(
+            (lw_base - lw_scaled).abs() < 1e-10,
+            "base={} scaled={}",
+            lw_base,
+            lw_scaled
+        );
+    }
+
+    #[test]
+    fn test_gcd_indivisible_constrained() {
+        let a: Vec<u64> = vec![10, 20, 30, 40];
+        let lw = log_w_for_m_e_sat(&a, 2, 15);
+        assert!(lw == f64::NEG_INFINITY, "expected -inf, got {}", lw);
+    }
+
+    #[test]
+    fn test_u64_vs_brute_force_constrained() {
+        let a: Vec<u64> = (1..=20).collect();
+        let n = a.len();
+
+        let mut w_exact: std::collections::HashMap<(usize, u64), u64> =
+            std::collections::HashMap::new();
+        for mask in 0..(1u64 << n) {
+            let m = mask.count_ones() as usize;
+            let sum: u64 = (0..n).filter(|&j| mask & (1 << j) != 0).map(|j| a[j]).sum();
+            *w_exact.entry((m, sum)).or_insert(0) += 1;
+        }
+
+        let mut sorted = a.clone();
+        sorted.sort();
+
+        let mut tested = 0;
+        for (&(m, e), &w) in &w_exact {
+            if w < W_MIN_FOR_ASYMPTOTIC_MATCH || m == 0 || m == n {
+                continue;
+            }
+            let e_min: u64 = sorted.iter().take(m).sum();
+            let e_max: u64 = sorted.iter().rev().take(m).sum();
+            if e <= e_min || e >= e_max {
+                continue;
+            }
+            let lw = log_w_for_m_e_sat(&a, m, e);
+            let err = (lw.exp() - w as f64).abs() / w as f64;
+            assert!(
+                err < 0.25,
+                "(m={}, E={}): exact={}, approx={:.1}, err={:.1}%",
+                m,
+                e,
+                w,
+                lw.exp(),
+                err * 100.0
+            );
+            tested += 1;
+        }
+        assert!(tested > 20, "tested only {} cells", tested);
+    }
+
+    #[test]
+    #[should_panic(expected = "nonzero")]
+    fn test_log_w_for_m_e_sat_panics_on_empty() {
+        log_w_for_m_e_sat(&[], 0, 10);
+    }
+
+    #[test]
+    #[should_panic(expected = "nonzero")]
+    fn test_log_w_for_m_e_sat_panics_on_all_zeros() {
+        log_w_for_m_e_sat(&[0, 0, 0], 1, 0);
     }
 }
