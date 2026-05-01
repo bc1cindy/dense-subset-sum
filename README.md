@@ -247,7 +247,7 @@ Any indexer output mapping to `Vec<u64>` of satoshis drops in. The scale switch 
 
 ## References
 
-1. Yuval Kogman ([nothingmuch](https://github.com/nothingmuch)) — privacy cost function specification, [*A mechanism for improving CoinJoin anonymity sets and sybil resistance*](https://gist.github.com/nothingmuch/f5b9a559958c6116606d9da0d4d884f2).
+1. Yuval Kogman ([nothingmuch](https://github.com/nothingmuch)) — [*A mechanism for improving CoinJoin anonymity sets and sybil resistance*](https://gist.github.com/nothingmuch/f5b9a559958c6116606d9da0d4d884f2).
 2. Sasamoto, Toyoizumi, Nishimori — *Statistical Mechanics of Subset Sum* ([arxiv:cond-mat/0106125](https://arxiv.org/pdf/cond-mat/0106125)).
 3. Maurer, Neudecker, Florian — *Anonymous CoinJoin Transactions with Arbitrary Values* (2017).
 4. Maxwell — *CoinJoin: Bitcoin privacy for the real world* (bitcointalk, 2013).
