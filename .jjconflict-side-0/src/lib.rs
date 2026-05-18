@@ -2,19 +2,21 @@ pub mod ambiguity;
 pub mod compute;
 pub mod count;
 pub mod loss;
+mod transaction;
 
 pub use loss::LossError;
 
 pub use ambiguity::Ambiguity;
 pub use compute::{DEFAULT_MEMORY_BUDGET, KNEE, radix_mappings, w_brute, w_sasamoto, w_sparse};
+pub use transaction::Transaction;
 
-pub use count::density_regime::{
-    Bracket, Interval, L, MAX_MONEY, Regime, kappa, kappa_c, regime_at_l, worst_case_kappa,
-};
 pub use count::companion::{SignedError, log_w_signed, sasamoto_approx, sasamoto_approx_m};
 pub use count::denoms::{
     binary_denoms_in_range, decimal_denoms_in_range, is_standard_denom, multiples_in_range,
     powers_in_range, standard_denoms_in_range, ternary_denoms_in_range,
+};
+pub use count::density_regime::{
+    Bracket, Interval, L, MAX_MONEY, Regime, kappa, kappa_c, regime_at_l, worst_case_kappa,
 };
 pub use count::oracle::{
     BruteError, DpError, brute_force_w, brute_force_w_restricted, dp_w, dp_w_restricted,
