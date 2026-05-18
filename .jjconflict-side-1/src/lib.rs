@@ -1,13 +1,14 @@
 pub mod ambiguity;
 pub mod compute;
 pub mod count;
+pub mod fixtures;
+pub mod harness;
 pub mod loss;
 mod transaction;
 
-pub use loss::LossError;
-
 pub use ambiguity::Ambiguity;
 pub use compute::{DEFAULT_MEMORY_BUDGET, KNEE, radix_mappings, w_brute, w_sasamoto, w_sparse};
+pub use loss::LossError;
 pub use transaction::Transaction;
 
 pub use count::companion::{SignedError, log_w_signed, sasamoto_approx, sasamoto_approx_m};

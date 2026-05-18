@@ -121,10 +121,13 @@ mod tests {
     #[test]
     fn sasamoto_agrees_with_brute_force_in_dense_regime() {
         use crate::count::sasamoto::log_w_for_e_sat;
+        use crate::fixtures::wasabi2_positive;
 
         let instances: Vec<Vec<u64>> = vec![
             (1..=20).map(|i| i * 100).collect(),
             (1..=20).map(|i| i * 137).collect(),
+            wasabi2_positive::wasabi2_pos_03b4bd61_20in34out().inputs,
+            wasabi2_positive::wasabi2_pos_4d1424ce_20in22out().inputs,
         ];
         let mut checked = 0;
         for a in &instances {

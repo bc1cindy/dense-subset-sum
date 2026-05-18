@@ -1,16 +1,17 @@
-//! Negative Wasabi 2 CoinJoins — lookalikes manually classified as non-coinjoins
-//! (consolidations, stdenom-style structured txs, etc) by the CRoCS group.
+//! Negative Wasabi 2 `CoinJoins` — lookalikes manually classified as non-coinjoins
+//! (consolidations, stdenom-style structured txs, etc) by the `CRoCS` group.
 //!
-//! Source: Centre for Research on Cryptography and Security (CRoCS), Masaryk
+//! Source: Centre for Research on Cryptography and Security (`CRoCS`), Masaryk
 //! University — *coinjoin-analysis: processing and analysis of Wasabi/Whirlpool/
-//! JoinMarket coinjoin datasets*. GitHub repository.
+//! `JoinMarket` coinjoin datasets*. GitHub repository.
 //! <https://github.com/crocs-muni/coinjoin-analysis>
 //! Data file: `data/wasabi2/false_cjtxs.json`.
 
 use crate::Transaction;
 
-/// Wasabi 2 tx b2f06c04208b (both_noremix): 15in/15out, fee=1812.
+/// Wasabi 2 tx b2f06c04208b (`both_noremix)`: 15in/15out, fee=1812.
 /// Almost all 10000-sat inputs — highly degenerate, W explodes from duplicates.
+#[must_use]
 pub fn wasabi2_b2f06c04() -> Transaction {
     Transaction::new(
         vec![
@@ -24,8 +25,9 @@ pub fn wasabi2_b2f06c04() -> Transaction {
     )
 }
 
-/// Wasabi 2 tx 1ee90cd780be (both_noremix): 15in/12out, fee=1800.
+/// Wasabi 2 tx 1ee90cd780be (`both_noremix)`: 15in/12out, fee=1800.
 /// 12 inputs of 10000 + 3 inputs of 600.
+#[must_use]
 pub fn wasabi2_1ee90cd7() -> Transaction {
     Transaction::new(
         vec![
@@ -39,8 +41,9 @@ pub fn wasabi2_1ee90cd7() -> Transaction {
     )
 }
 
-/// Wasabi 2 tx fc1c83cc5e20 (both_noremix): 16in/16out, fee=676.
+/// Wasabi 2 tx fc1c83cc5e20 (`both_noremix)`: 16in/16out, fee=676.
 /// 15 inputs of 10000 + 1 input of 9668.
+#[must_use]
 pub fn wasabi2_fc1c83cc() -> Transaction {
     Transaction::new(
         vec![
@@ -54,8 +57,9 @@ pub fn wasabi2_fc1c83cc() -> Transaction {
     )
 }
 
-/// Wasabi 2 tx 6a6dcc22f92f (both_noremix): 17in/6out, fee=14656.
+/// Wasabi 2 tx 6a6dcc22f92f (`both_noremix)`: 17in/6out, fee=14656.
 /// Consolidation: many varied inputs → 5×1BTC + change.
+#[must_use]
 pub fn wasabi2_6a6dcc22() -> Transaction {
     Transaction::new(
         vec![
@@ -74,8 +78,9 @@ pub fn wasabi2_6a6dcc22() -> Transaction {
     )
 }
 
-/// Wasabi 2 tx cb7488bf263c (both_noremix): 17in/12out, fee=1539.
+/// Wasabi 2 tx cb7488bf263c (`both_noremix)`: 17in/12out, fee=1539.
 /// Mixed: 1 large input (10M), many ~1M inputs, smaller change.
+#[must_use]
 pub fn wasabi2_cb7488bf() -> Transaction {
     Transaction::new(
         vec![
@@ -89,8 +94,9 @@ pub fn wasabi2_cb7488bf() -> Transaction {
     )
 }
 
-/// Wasabi 2 tx 47c7315148 (both_noremix): 18in/7out, fee=1452.
+/// Wasabi 2 tx 47c7315148 (`both_noremix)`: 18in/7out, fee=1452.
 /// Varied inputs → 6×0.1BTC + change.
+#[must_use]
 pub fn wasabi2_47c73151() -> Transaction {
     Transaction::new(
         vec![
@@ -104,8 +110,9 @@ pub fn wasabi2_47c73151() -> Transaction {
     )
 }
 
-/// Wasabi 2 tx 2cc0dc57b333 (both_noremix): 18in/9out, fee=3028.
+/// Wasabi 2 tx 2cc0dc57b333 (`both_noremix)`: 18in/9out, fee=3028.
 /// Varied inputs → 8×0.01BTC + change.
+#[must_use]
 pub fn wasabi2_2cc0dc57() -> Transaction {
     Transaction::new(
         vec![
@@ -119,8 +126,9 @@ pub fn wasabi2_2cc0dc57() -> Transaction {
     )
 }
 
-/// Wasabi 2 tx acce69a9153b (both_noremix): 18in/14out, fee=82771.
+/// Wasabi 2 tx acce69a9153b (`both_noremix)`: 18in/14out, fee=82771.
 /// One large input (2.5M) + many small ~6-8K inputs → 14×200K outputs.
+#[must_use]
 pub fn wasabi2_acce69a9() -> Transaction {
     Transaction::new(
         vec![
@@ -134,8 +142,9 @@ pub fn wasabi2_acce69a9() -> Transaction {
     )
 }
 
-/// Wasabi 2 tx 3e8328fd5ae3 (both_noremix): 19in/11out, fee=23231.
+/// Wasabi 2 tx 3e8328fd5ae3 (`both_noremix)`: 19in/11out, fee=23231.
 /// Varied ~5M inputs → 10×10M outputs + change.
+#[must_use]
 pub fn wasabi2_3e8328fd() -> Transaction {
     Transaction::new(
         vec![
@@ -150,8 +159,9 @@ pub fn wasabi2_3e8328fd() -> Transaction {
     )
 }
 
-/// Wasabi 2 tx fae02f206b62 (both_noremix): 21in/23out, fee=14562.
+/// Wasabi 2 tx fae02f206b62 (`both_noremix)`: 21in/23out, fee=14562.
 /// 1 large input (2M) + 20×100K → 1×2M + 20×100K + change.
+#[must_use]
 pub fn wasabi2_fae02f20() -> Transaction {
     Transaction::new(
         vec![
@@ -167,8 +177,9 @@ pub fn wasabi2_fae02f20() -> Transaction {
     )
 }
 
-/// Wasabi 2 tx c21274a8ba99 (both_noremix): 23in/6out, fee=21192.
+/// Wasabi 2 tx c21274a8ba99 (`both_noremix)`: 23in/6out, fee=21192.
 /// Consolidation: 23 varied inputs → 5×1BTC + change.
+#[must_use]
 pub fn wasabi2_c21274a8() -> Transaction {
     Transaction::new(
         vec![
@@ -188,8 +199,9 @@ pub fn wasabi2_c21274a8() -> Transaction {
     )
 }
 
-/// Wasabi 2 tx 319cf8f6b338 (both_noremix): 26in/6out, fee=1965.
+/// Wasabi 2 tx 319cf8f6b338 (`both_noremix)`: 26in/6out, fee=1965.
 /// 1 large input (1BTC) + 25 small ~80-300K inputs → mixed outputs.
+#[must_use]
 pub fn wasabi2_319cf8f6() -> Transaction {
     Transaction::new(
         vec![
@@ -226,8 +238,9 @@ pub fn wasabi2_319cf8f6() -> Transaction {
     )
 }
 
-/// Wasabi 2 tx 54818554f0f6 (both_noremix): 31in/23out, fee=2832.
+/// Wasabi 2 tx 54818554f0f6 (`both_noremix)`: 31in/23out, fee=2832.
 /// Many round inputs (10M-100M) → 9×50M + smaller outputs.
+#[must_use]
 pub fn wasabi2_54818554() -> Transaction {
     Transaction::new(
         vec![
@@ -291,8 +304,9 @@ pub fn wasabi2_54818554() -> Transaction {
     )
 }
 
-/// Wasabi 2 tx bb2cbe9fbc56 (both_noremix): 58in/6out, fee=39888.
+/// Wasabi 2 tx bb2cbe9fbc56 (`both_noremix)`: 58in/6out, fee=39888.
 /// Large consolidation: 58 varied inputs → 5×2BTC + change.
+#[must_use]
 pub fn wasabi2_bb2cbe9f() -> Transaction {
     Transaction::new(
         vec![
@@ -316,8 +330,9 @@ pub fn wasabi2_bb2cbe9f() -> Transaction {
     )
 }
 
-/// Wasabi 2 tx de523121b7fa (both_noremix): 85in/6out, fee=86371.
+/// Wasabi 2 tx de523121b7fa (`both_noremix)`: 85in/6out, fee=86371.
 /// Very large consolidation: 85 inputs → 5×1BTC + change.
+#[must_use]
 pub fn wasabi2_de523121() -> Transaction {
     Transaction::new(
         vec![
@@ -344,8 +359,9 @@ pub fn wasabi2_de523121() -> Transaction {
     )
 }
 
-/// Wasabi 2 tx 37e11e3f1c93 (both_noremix): 159in/3out, fee=22020.
+/// Wasabi 2 tx 37e11e3f1c93 (`both_noremix)`: 159in/3out, fee=22020.
 /// Massive consolidation: 159 inputs (~600K-4M each) → 3×0.5BTC.
+#[must_use]
 pub fn wasabi2_37e11e3f() -> Transaction {
     Transaction::new(
         vec![
@@ -375,6 +391,7 @@ pub fn wasabi2_37e11e3f() -> Transaction {
 
 /// Wasabi 2 tx 309f1a1a1766 (stdenom): 28in/16out, fee=2404.
 /// Powers-of-3 denominations (14348907, 28697814) + round values.
+#[must_use]
 pub fn wasabi2_309f1a1a() -> Transaction {
     Transaction::new(
         vec![
@@ -393,6 +410,7 @@ pub fn wasabi2_309f1a1a() -> Transaction {
 
 /// Wasabi 2 tx 673a95f625d6 (stdenom): 18in/34out, fee=4592.
 /// Many outputs: 5×80M + 7×28.7M + 7×16.8M + 7×14.3M + 7×10M + change.
+#[must_use]
 pub fn wasabi2_673a95f6() -> Transaction {
     Transaction::new(
         vec![
@@ -412,6 +430,7 @@ pub fn wasabi2_673a95f6() -> Transaction {
 
 /// Wasabi 2 tx ed721b48e474 (stdenom): 26in/16out, fee=2268.
 /// Powers-of-3 denominations mixed with round values.
+#[must_use]
 pub fn wasabi2_ed721b48() -> Transaction {
     Transaction::new(
         vec![
@@ -430,6 +449,7 @@ pub fn wasabi2_ed721b48() -> Transaction {
 
 /// Wasabi 2 tx ba89a07dfd16 (stdenom): 28in/15out, fee=2373.
 /// Powers-of-3 denominations consolidating to larger 3^x outputs.
+#[must_use]
 pub fn wasabi2_ba89a07d() -> Transaction {
     Transaction::new(
         vec![
@@ -446,6 +466,7 @@ pub fn wasabi2_ba89a07d() -> Transaction {
     )
 }
 
+#[must_use]
 pub fn all_wasabi2_false_cjtxs() -> Vec<(&'static str, Transaction)> {
     vec![
         // both_noremix — small (N_inputs ≤ 21)

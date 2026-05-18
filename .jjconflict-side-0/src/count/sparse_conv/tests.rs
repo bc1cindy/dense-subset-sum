@@ -452,6 +452,69 @@ fn bucketed_recover_phi_split_aggregates_to_truth() {
     );
 }
 
+/// Wasabi 2 fixtures repeat denominations; collapse to `(value, multiplicity)`.
+fn to_multiset(inputs: &[u64]) -> Vec<(u64, u64)> {
+    let mut counts: HashMap<u64, u64> = HashMap::new();
+    for &v in inputs {
+        *counts.entry(v).or_insert(0) += 1;
+    }
+    counts.into_iter().collect()
+}
+
+/// Wasabi 2 multisets exercise heavy-duplicate shape; `‖A‖₁² ≤ 484 ≪ P` holds.
+#[test]
+fn algorithms_match_brute_force_on_wasabi2_inputs() {
+    use crate::fixtures::wasabi2_positive::{
+        wasabi2_pos_03b4bd61_20in34out, wasabi2_pos_622cb867_22in27out,
+    };
+    let txs = [
+        wasabi2_pos_03b4bd61_20in34out(),
+        wasabi2_pos_622cb867_22in27out(),
+    ];
+    for tx in &txs {
+        let a = to_multiset(&tx.inputs);
+        let truth = brute_force(&a, &a);
+        for seed in 0u64..3 {
+            let alg1 = convolve_seeded::<Goldilocks>(&a, &a, seed, u32::MAX);
+            assert!(
+                alg1.termination() == Termination::Complete,
+                "Alg1 must complete on N={} wasabi2",
+                tx.inputs.len()
+            );
+            assert_matches_truth(&alg1.support, &truth);
+
+            let alg4 = convolve_seeded_eps::<Goldilocks>(&a, &a, seed, 1.0, u32::MAX);
+            assert!(
+                alg4.termination() == Termination::Complete,
+                "Alg4 must complete on N={} wasabi2",
+                tx.inputs.len()
+            );
+            assert_matches_truth(&alg4.support, &truth);
+
+            let alg6 = convolve_seeded_hybrid::<Goldilocks>(&a, &a, seed, u32::MAX);
+            assert!(
+                alg6.termination() == Termination::Complete,
+                "Alg6 must complete on N={} wasabi2",
+                tx.inputs.len()
+            );
+            assert_matches_truth(&alg6.support, &truth);
+        }
+    }
+}
+
+/// Lemma 16 lower-bound semantics on Wasabi 2 multisets across many seeds.
+#[test]
+fn bucketed_recover_lower_bound_on_wasabi2_inputs() {
+    use crate::fixtures::wasabi2_positive::wasabi2_pos_03b4bd61_20in34out;
+    let tx = wasabi2_pos_03b4bd61_20in34out();
+    let a = to_multiset(&tx.inputs);
+    let truth = brute_force(&a, &a);
+    for seed in 0u64..32 {
+        let h = LinearHash::new(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1, 256);
+        let r = bucketed_recover::<Goldilocks>(&a, &a, &h);
+        assert!(lower_bound_holds(&r, &truth), "seed={seed}");
+    }
+}
 
 proptest! {
     #[test]
