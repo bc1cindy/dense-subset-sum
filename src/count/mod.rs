@@ -1,3 +1,4 @@
+pub mod companion;
 pub mod denoms;
 pub mod density_regime;
 pub mod oracle;

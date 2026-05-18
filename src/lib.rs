@@ -3,6 +3,7 @@ pub mod count;
 pub use count::density_regime::{
     Bracket, Interval, L, MAX_MONEY, Regime, kappa, kappa_c, regime_at_l, worst_case_kappa,
 };
+pub use count::companion::{SignedError, log_w_signed, sasamoto_approx, sasamoto_approx_m};
 pub use count::denoms::{
     binary_denoms_in_range, decimal_denoms_in_range, is_standard_denom, multiples_in_range,
     powers_in_range, standard_denoms_in_range, ternary_denoms_in_range,
