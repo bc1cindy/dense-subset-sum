@@ -1,6 +1,8 @@
-//! Counting paths over a CoinJoin transaction. All return [`Ambiguity`].
+//! Four counting paths over a CoinJoin transaction. All return [`Ambiguity`]:
+//! [`w_brute`], [`radix_mappings`], [`w_sparse`], [`w_sasamoto`].
 
 use crate::Ambiguity;
+use crate::count::companion::sasamoto_approx;
 use crate::count::denoms::standard_denoms_in_range;
 use crate::count::oracle::{BruteError, brute_force_w_restricted};
 use crate::count::radix::{
@@ -138,6 +140,31 @@ pub fn w_sparse(
     (count, bound).into()
 }
 
+/// Saddle-point `log W(E)` peak over Dense-regime output subsums (Sasamoto cond-mat/0106125).
+/// Approximate, never trustworthy as sole signal: cross-validate against [`w_brute`]/[`w_sparse`].
+#[must_use]
+pub fn w_sasamoto(inputs: &[u64], outputs: &[u64]) -> Ambiguity {
+    if inputs.is_empty() || outputs.is_empty() {
+        return Ambiguity::Unknown;
+    }
+    let Some(targets) = output_subsums(outputs) else {
+        return Ambiguity::Unknown;
+    };
+    let mut peak: Option<f64> = None;
+    let sum_a: u64 = inputs.iter().sum();
+    for target in targets {
+        if target == 0 || target >= sum_a {
+            continue;
+        }
+        if let Some(log_w) = sasamoto_approx(inputs, target) {
+            if log_w.is_finite() {
+                peak = Some(peak.map_or(log_w, |p| p.max(log_w)));
+            }
+        }
+    }
+    peak.into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,6 +203,12 @@ mod tests {
         assert_eq!(w_sparse(&[], &[5, 10], 4, nz(1000)), Ambiguity::Exact(0));
         assert_eq!(w_sparse(&[5, 10], &[], 4, nz(1000)), Ambiguity::Exact(0));
         assert_eq!(w_sparse(&[1], &[1], 0, nz(1000)), Ambiguity::Exact(0));
+    }
+
+    #[test]
+    fn w_sasamoto_empty_is_unknown() {
+        assert_eq!(w_sasamoto(&[], &[5]), Ambiguity::Unknown);
+        assert_eq!(w_sasamoto(&[5], &[]), Ambiguity::Unknown);
     }
 
     #[test]
@@ -252,6 +285,24 @@ mod tests {
             outputs in prop::collection::vec(1u64..=100, 1..=4),
         ) {
             prop_assert_eq!(radix_mappings(&outputs, 0), Ambiguity::Exact(0));
+        }
+
+        /// Empty/degenerate inputs always yield `Ambiguity::Unknown` from sasamoto.
+        #[test]
+        fn w_sasamoto_unknown_on_empty(
+            outputs in prop::collection::vec(1u64..=1_000_000, 1..=8),
+        ) {
+            prop_assert_eq!(w_sasamoto(&[], &outputs), Ambiguity::Unknown);
+            prop_assert_eq!(w_sasamoto(&outputs, &[]), Ambiguity::Unknown);
+        }
+
+        /// At tiny N (<=8), regime is Sparse/Transitional so sasamoto returns Unknown.
+        #[test]
+        fn w_sasamoto_unknown_at_tiny_n(
+            inputs in prop::collection::vec(1u64..=1000, 2..=8),
+            outputs in prop::collection::vec(1u64..=1000, 1..=4),
+        ) {
+            prop_assert_eq!(w_sasamoto(&inputs, &outputs), Ambiguity::Unknown);
         }
     }
 }
