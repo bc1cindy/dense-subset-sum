@@ -19,3 +19,5 @@ pub use count::radix::{
     radix_sumset, radix_sumset_counts, radix_sumsets_up_to, sumset_density,
 };
 pub use count::shape::{InputShape, radix_density};
+pub use count::sparse_conv::{Field, Goldilocks};
+pub use count::sumset::{Bound, Count, GradedSumset, GradedSumsetBudget, GradedSumsetBuilder};
