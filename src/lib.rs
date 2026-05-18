@@ -1,10 +1,12 @@
 pub mod ambiguity;
+pub mod compute;
 pub mod count;
 pub mod loss;
 
 pub use loss::LossError;
 
 pub use ambiguity::Ambiguity;
+pub use compute::{KNEE, w_brute};
 
 pub use count::density_regime::{
     Bracket, Interval, L, MAX_MONEY, Regime, kappa, kappa_c, regime_at_l, worst_case_kappa,
