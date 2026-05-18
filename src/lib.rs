@@ -18,6 +18,7 @@ pub use count::radix::{
     radix_gaps_per_k, radix_mapping_count, radix_relative_gaps, radix_relative_gaps_per_k,
     radix_sumset, radix_sumset_counts, radix_sumsets_up_to, sumset_density,
 };
+pub use count::sasamoto::{log_w_for_e_sat, log_w_for_m_e_sat, m_sqrt_over_2, n_c};
 pub use count::shape::{InputShape, radix_density};
 pub use count::sparse_conv::{Field, Goldilocks};
 pub use count::sumset::{Bound, Count, GradedSumset, GradedSumsetBudget, GradedSumsetBuilder};
