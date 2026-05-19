@@ -6,12 +6,20 @@ use crate::count::oracle::{BruteError, brute_force_w_restricted};
 use crate::count::radix::{
     DEFAULT_MAX_DENOM_SATS, DEFAULT_MIN_DENOM_SATS, radix_decompose, radix_mapping_count,
 };
+use crate::count::sparse_conv::Goldilocks;
+use crate::count::sumset::{Bound, GradedSumset, GradedSumsetBudget};
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroUsize;
 
 /// Default cap on subset size M. Beyond 5, `C(N, M)` (binomial) grows fast enough that
 /// the count is dominated by combinatorial inflation rather than information about distinct
 /// payment interpretations; callers may override per problem.
 pub const KNEE: usize = 5;
+
+/// Default `memory_budget` for [`w_sparse`]: 2^26 ≈ 67 M sumset entries (~1.5 GB at
+/// ~24 bytes per entry), matching the upper bound suggested for sparse convolution before
+/// switching strategies. Callers on memory-constrained targets should override.
+pub const DEFAULT_MEMORY_BUDGET: NonZeroUsize = NonZeroUsize::new(1 << 26).unwrap();
 
 /// Non-empty output subset sums; `None` when `outputs.len() > 63` exceeds u64 mask width.
 pub(crate) fn output_subsums(outputs: &[u64]) -> Option<HashSet<u64>> {
@@ -92,10 +100,52 @@ pub fn radix_mappings(outputs: &[u64], max_size: usize) -> Ambiguity {
     Ambiguity::Exact(total)
 }
 
+/// Count via sparse convolution (Bringmann/Fischer/Nakos arXiv:2107.07625). Returns
+/// `Ambiguity::Exact` if no truncation, else `Ambiguity::LowerBound`. `max_size` caps subset size M.
+#[must_use]
+pub fn w_sparse(
+    inputs: &[u64],
+    outputs: &[u64],
+    max_size: usize,
+    memory_budget: NonZeroUsize,
+) -> Ambiguity {
+    if inputs.is_empty() || outputs.is_empty() || max_size == 0 {
+        return Ambiguity::Exact(0);
+    }
+    let Some(targets_set) = output_subsums(outputs) else {
+        return Ambiguity::Unknown;
+    };
+    let mut targets: Vec<u64> = targets_set.into_iter().collect();
+    targets.sort_unstable();
+    let n_in = inputs.len();
+    let cap = max_size.min(n_in);
+    let full_input_sum: u64 = inputs.iter().sum();
+    let budget = GradedSumsetBudget::<Goldilocks>::default().with_max_size(memory_budget);
+    let sumset: GradedSumset =
+        GradedSumset::<Goldilocks>::builder(inputs, budget, &targets).bounded(cap);
+    let mut count: u128 = 0;
+    let mut bound = Bound::Exact;
+    for &target in &targets {
+        let c = sumset.count_total(target);
+        count = count.saturating_add(u128::from(c.visible()));
+        bound = bound.join(c.bound());
+    }
+    // Match w_brute's exclusion of the trivial full-input mapping.
+    if cap == n_in && targets.binary_search(&full_input_sum).is_ok() {
+        let trivial = sumset.count_at(n_in, full_input_sum);
+        count = count.saturating_sub(u128::from(trivial.visible()));
+    }
+    (count, bound).into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    fn nz(n: usize) -> NonZeroUsize {
+        NonZeroUsize::new(n).unwrap()
+    }
 
     #[test]
     fn w_brute_empty_is_zero() {
@@ -119,6 +169,13 @@ mod tests {
     fn w_brute_n_above_20_is_unknown() {
         let inputs: Vec<u64> = (1..=21).collect();
         assert_eq!(w_brute(&inputs, &[10], 5), Ambiguity::Unknown);
+    }
+
+    #[test]
+    fn w_sparse_empty_is_zero_exact() {
+        assert_eq!(w_sparse(&[], &[5, 10], 4, nz(1000)), Ambiguity::Exact(0));
+        assert_eq!(w_sparse(&[5, 10], &[], 4, nz(1000)), Ambiguity::Exact(0));
+        assert_eq!(w_sparse(&[1], &[1], 0, nz(1000)), Ambiguity::Exact(0));
     }
 
     #[test]
@@ -157,6 +214,17 @@ mod tests {
             outputs in prop::collection::vec(1u64..=100, 1..=4),
         ) {
             prop_assert_eq!(w_brute(&inputs, &outputs, 0), Ambiguity::Exact(0));
+        }
+
+        #[test]
+        fn w_sparse_le_w_brute(
+            inputs in prop::collection::vec(1u64..=30, 2..=6),
+            outputs in prop::collection::vec(1u64..=30, 1..=4),
+        ) {
+            let brute = w_brute(&inputs, &outputs, inputs.len()).lower_bound_count().unwrap_or(0);
+            let sparse = w_sparse(&inputs, &outputs, inputs.len(), nz(1_000_000))
+                .lower_bound_count().unwrap_or(0);
+            prop_assert!(sparse <= brute);
         }
 
         #[test]
