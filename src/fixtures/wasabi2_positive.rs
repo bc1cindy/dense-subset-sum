@@ -1,17 +1,22 @@
-//! Positive Wasabi 2 CoinJoins — 30 manual-bucket txs, stratified by N_in
+//! Positive Wasabi 2 `CoinJoins` — 30 manual-bucket txs, stratified by `N_in`
 //! with seed=42.
 //!
-//! Source: Centre for Research on Cryptography and Security (CRoCS), Masaryk
+//! Source: Centre for Research on Cryptography and Security (`CRoCS`), Masaryk
 //! University — *coinjoin-analysis: processing and analysis of Wasabi/Whirlpool/
-//! JoinMarket coinjoin datasets*. GitHub repository.
+//! `JoinMarket` coinjoin datasets*. GitHub repository.
 //! <https://github.com/crocs-muni/coinjoin-analysis>
 //! Data file: `data/wasabi2/txid_coord.json`.
+
+// Sat amounts kept verbatim from upstream dataset; underscores would mutate the
+// representation and obscure source fidelity.
+#![allow(clippy::unreadable_literal)]
 
 use crate::Transaction;
 
 /// txid: 03b4bd61d7543314ec86534052149cc61485792b6cda739b501a171cd1b7e03b
 /// coordinator: wasabicoordinator, stratum: small
-/// N_in=20, N_out=34, fee=63476
+/// `N_in=20`, `N_out=34`, fee=63476
+#[must_use]
 pub fn wasabi2_pos_03b4bd61_20in34out() -> Transaction {
     Transaction::new(
         vec![
@@ -29,7 +34,8 @@ pub fn wasabi2_pos_03b4bd61_20in34out() -> Transaction {
 
 /// txid: 0f08b7044629bfff6bac2f51fb2455352c8ea550f9d34bc029f61059cfd65dbb
 /// coordinator: wasabicoordinator, stratum: large
-/// N_in=45, N_out=41, fee=44801
+/// `N_in=45`, `N_out=41`, fee=44801
+#[must_use]
 pub fn wasabi2_pos_0f08b704_45in41out() -> Transaction {
     Transaction::new(
         vec![
@@ -50,7 +56,8 @@ pub fn wasabi2_pos_0f08b704_45in41out() -> Transaction {
 
 /// txid: 1089effefe72ca62454f17e43d3aa1d8965bdbd917a9332b2cf8eb7a8477d8d4
 /// coordinator: wasabicoordinator, stratum: medium
-/// N_in=37, N_out=34, fee=63190
+/// `N_in=37`, `N_out=34`, fee=63190
+#[must_use]
 pub fn wasabi2_pos_1089effe_37in34out() -> Transaction {
     Transaction::new(
         vec![
@@ -70,7 +77,8 @@ pub fn wasabi2_pos_1089effe_37in34out() -> Transaction {
 
 /// txid: 2b611fb0cac144c65017419dfcda8435abf53259cd8c4d8f6ec9178a8a1e933e
 /// coordinator: wasabicoordinator, stratum: medium
-/// N_in=30, N_out=33, fee=43513
+/// `N_in=30`, `N_out=33`, fee=43513
+#[must_use]
 pub fn wasabi2_pos_2b611fb0_30in33out() -> Transaction {
     Transaction::new(
         vec![
@@ -89,7 +97,8 @@ pub fn wasabi2_pos_2b611fb0_30in33out() -> Transaction {
 
 /// txid: 43eb289812d88067ca9a3f126e8ad7810f6616fe9a17a61537f12ffb37235501
 /// coordinator: kruw, stratum: medium
-/// N_in=23, N_out=32, fee=65746
+/// `N_in=23`, `N_out=32`, fee=65746
+#[must_use]
 pub fn wasabi2_pos_43eb2898_23in32out() -> Transaction {
     Transaction::new(
         vec![
@@ -108,7 +117,8 @@ pub fn wasabi2_pos_43eb2898_23in32out() -> Transaction {
 
 /// txid: 4861a0185f8e76792873eab46cec42372baf85c388351c3bd28d377202594dcf
 /// coordinator: kruw, stratum: large
-/// N_in=113, N_out=114, fee=346020
+/// `N_in=113`, `N_out=114`, fee=346020
+#[must_use]
 pub fn wasabi2_pos_4861a018_113in114out() -> Transaction {
     Transaction::new(
         vec![
@@ -144,7 +154,8 @@ pub fn wasabi2_pos_4861a018_113in114out() -> Transaction {
 
 /// txid: 4d1424ce24c653ea38e89584fa2aa446950c035dab810fecdfbec7af92d92af1
 /// coordinator: kruw, stratum: small
-/// N_in=20, N_out=22, fee=59482
+/// `N_in=20`, `N_out=22`, fee=59482
+#[must_use]
 pub fn wasabi2_pos_4d1424ce_20in22out() -> Transaction {
     Transaction::new(
         vec![
@@ -161,7 +172,8 @@ pub fn wasabi2_pos_4d1424ce_20in22out() -> Transaction {
 
 /// txid: 58cbb3903db64faca0a03dfebc42d374e7c79a3da61f6f80f7871a6346e81bc0
 /// coordinator: wasabicoordinator, stratum: small
-/// N_in=20, N_out=33, fee=66718
+/// `N_in=20`, `N_out=33`, fee=66718
+#[must_use]
 pub fn wasabi2_pos_58cbb390_20in33out() -> Transaction {
     Transaction::new(
         vec![
@@ -179,7 +191,8 @@ pub fn wasabi2_pos_58cbb390_20in33out() -> Transaction {
 
 /// txid: 5e06a7fda701b34d767e189ebb70f6156603b064ac27cc8a1ebf25d6c3af9ea8
 /// coordinator: wasabicoordinator, stratum: small
-/// N_in=20, N_out=26, fee=68311
+/// `N_in=20`, `N_out=26`, fee=68311
+#[must_use]
 pub fn wasabi2_pos_5e06a7fd_20in26out() -> Transaction {
     Transaction::new(
         vec![
@@ -196,7 +209,8 @@ pub fn wasabi2_pos_5e06a7fd_20in26out() -> Transaction {
 
 /// txid: 622cb867e03946428ad53440faf2a4645e8aafbed94a8a8524db0d6a8718a748
 /// coordinator: kruw, stratum: medium
-/// N_in=22, N_out=27, fee=50527
+/// `N_in=22`, `N_out=27`, fee=50527
+#[must_use]
 pub fn wasabi2_pos_622cb867_22in27out() -> Transaction {
     Transaction::new(
         vec![
@@ -214,7 +228,8 @@ pub fn wasabi2_pos_622cb867_22in27out() -> Transaction {
 
 /// txid: 6c1da4ab14298ba57fb8d74f8bf577a91053e213473490e7e270b8e3e2bfbbeb
 /// coordinator: wasabicoordinator, stratum: large
-/// N_in=42, N_out=41, fee=90696
+/// `N_in=42`, `N_out=41`, fee=90696
+#[must_use]
 pub fn wasabi2_pos_6c1da4ab_42in41out() -> Transaction {
     Transaction::new(
         vec![
@@ -234,7 +249,8 @@ pub fn wasabi2_pos_6c1da4ab_42in41out() -> Transaction {
 
 /// txid: 73b768395073334d791a9207056336a164be2d73777d2cee5f23973de4db9f98
 /// coordinator: kruw, stratum: large
-/// N_in=89, N_out=103, fee=176218
+/// `N_in=89`, `N_out=103`, fee=176218
+#[must_use]
 pub fn wasabi2_pos_73b76839_89in103out() -> Transaction {
     Transaction::new(
         vec![
@@ -265,7 +281,8 @@ pub fn wasabi2_pos_73b76839_89in103out() -> Transaction {
 
 /// txid: 77a1788c36a2e4e434c704d11884e14c617ccf9392b252d5c8ce8d37bdb70a00
 /// coordinator: wasabicoordinator, stratum: medium
-/// N_in=34, N_out=40, fee=93976
+/// `N_in=34`, `N_out=40`, fee=93976
+#[must_use]
 pub fn wasabi2_pos_77a1788c_34in40out() -> Transaction {
     Transaction::new(
         vec![
@@ -285,7 +302,8 @@ pub fn wasabi2_pos_77a1788c_34in40out() -> Transaction {
 
 /// txid: 81326e4e138ece681451a28200fa3c85984ffd29331dc73ca454cc33d6fca900
 /// coordinator: kruw, stratum: large
-/// N_in=122, N_out=125, fee=160355
+/// `N_in=122`, `N_out=125`, fee=160355
+#[must_use]
 pub fn wasabi2_pos_81326e4e_122in125out() -> Transaction {
     Transaction::new(
         vec![
@@ -322,7 +340,8 @@ pub fn wasabi2_pos_81326e4e_122in125out() -> Transaction {
 
 /// txid: 83237a64316e777236ee3f39c76e37a7b1a67bc90e619766766ccdb8ef2b3410
 /// coordinator: kruw, stratum: medium
-/// N_in=38, N_out=48, fee=122971
+/// `N_in=38`, `N_out=48`, fee=122971
+#[must_use]
 pub fn wasabi2_pos_83237a64_38in48out() -> Transaction {
     Transaction::new(
         vec![
@@ -343,7 +362,8 @@ pub fn wasabi2_pos_83237a64_38in48out() -> Transaction {
 
 /// txid: 83482481c763be0247771015be35eda4ae52d0be059e4dd3f67447b418604e4f
 /// coordinator: kruw, stratum: medium
-/// N_in=39, N_out=38, fee=108185
+/// `N_in=39`, `N_out=38`, fee=108185
+#[must_use]
 pub fn wasabi2_pos_83482481_39in38out() -> Transaction {
     Transaction::new(
         vec![
@@ -363,7 +383,8 @@ pub fn wasabi2_pos_83482481_39in38out() -> Transaction {
 
 /// txid: 8674ca2f4436b56e71bc8f1b1bb8f7fb687898a70323245f5e1a5b45fd8aa4b6
 /// coordinator: wasabicoordinator, stratum: large
-/// N_in=46, N_out=45, fee=64415
+/// `N_in=46`, `N_out=45`, fee=64415
+#[must_use]
 pub fn wasabi2_pos_8674ca2f_46in45out() -> Transaction {
     Transaction::new(
         vec![
@@ -385,7 +406,8 @@ pub fn wasabi2_pos_8674ca2f_46in45out() -> Transaction {
 
 /// txid: 88a55dc18a3007dff1b7adcf66cc0c99283ec2e5f20f16e4f560964818b4f66d
 /// coordinator: kruw, stratum: small
-/// N_in=20, N_out=19, fee=41349
+/// `N_in=20`, `N_out=19`, fee=41349
+#[must_use]
 pub fn wasabi2_pos_88a55dc1_20in19out() -> Transaction {
     Transaction::new(
         vec![
@@ -402,7 +424,8 @@ pub fn wasabi2_pos_88a55dc1_20in19out() -> Transaction {
 
 /// txid: 8b445bbbea5c2c788b46846859d9fe2fca1fbfd3b000c02a132d8496968fee27
 /// coordinator: kruw, stratum: large
-/// N_in=76, N_out=100, fee=110799
+/// `N_in=76`, `N_out=100`, fee=110799
+#[must_use]
 pub fn wasabi2_pos_8b445bbb_76in100out() -> Transaction {
     Transaction::new(
         vec![
@@ -432,7 +455,8 @@ pub fn wasabi2_pos_8b445bbb_76in100out() -> Transaction {
 
 /// txid: 95589bc28a5fd17a0dc974903bbbdbdf6546bd91052b1ed9924d26333a8d946f
 /// coordinator: kruw, stratum: medium
-/// N_in=22, N_out=30, fee=51408
+/// `N_in=22`, `N_out=30`, fee=51408
+#[must_use]
 pub fn wasabi2_pos_95589bc2_22in30out() -> Transaction {
     Transaction::new(
         vec![
@@ -450,7 +474,8 @@ pub fn wasabi2_pos_95589bc2_22in30out() -> Transaction {
 
 /// txid: 9f9b78301a9c88fa31f724e91295fcfe0cc2346d1c8ef68a5be7b690482b67d9
 /// coordinator: wasabicoordinator, stratum: small
-/// N_in=20, N_out=24, fee=66419
+/// `N_in=20`, `N_out=24`, fee=66419
+#[must_use]
 pub fn wasabi2_pos_9f9b7830_20in24out() -> Transaction {
     Transaction::new(
         vec![
@@ -467,7 +492,8 @@ pub fn wasabi2_pos_9f9b7830_20in24out() -> Transaction {
 
 /// txid: a640a34cfb2f40bc3b1cc0e46604647688502e04d04df29287f64569f7d539c0
 /// coordinator: kruw, stratum: large
-/// N_in=125, N_out=138, fee=212062
+/// `N_in=125`, `N_out=138`, fee=212062
+#[must_use]
 pub fn wasabi2_pos_a640a34c_125in138out() -> Transaction {
     Transaction::new(
         vec![
@@ -505,8 +531,9 @@ pub fn wasabi2_pos_a640a34c_125in138out() -> Transaction {
 }
 
 /// txid: bd650c2052b1c95f8abb6146e7684b4396a7d43d3677ecdb506462a34640202c
-/// coordinator: unknown_2024_28ce7b, stratum: small
-/// N_in=15, N_out=46, fee=14115
+/// coordinator: `unknown_2024_28ce7b`, stratum: small
+/// `N_in=15`, `N_out=46`, fee=14115
+#[must_use]
 pub fn wasabi2_pos_bd650c20_15in46out() -> Transaction {
     Transaction::new(
         vec![
@@ -524,7 +551,8 @@ pub fn wasabi2_pos_bd650c20_15in46out() -> Transaction {
 
 /// txid: c366a07ff6177b223abe11deea7a84867d1aee30722d2a5f552246b97e8b9101
 /// coordinator: wasabicoordinator, stratum: small
-/// N_in=20, N_out=34, fee=70498
+/// `N_in=20`, `N_out=34`, fee=70498
+#[must_use]
 pub fn wasabi2_pos_c366a07f_20in34out() -> Transaction {
     Transaction::new(
         vec![
@@ -542,7 +570,8 @@ pub fn wasabi2_pos_c366a07f_20in34out() -> Transaction {
 
 /// txid: da3ee6186bedce40d60a7a6863b6a5ce772438ff1e305e5eaf475bc2a9765185
 /// coordinator: wasabicoordinator, stratum: large
-/// N_in=48, N_out=53, fee=35729
+/// `N_in=48`, `N_out=53`, fee=35729
+#[must_use]
 pub fn wasabi2_pos_da3ee618_48in53out() -> Transaction {
     Transaction::new(
         vec![
@@ -564,7 +593,8 @@ pub fn wasabi2_pos_da3ee618_48in53out() -> Transaction {
 
 /// txid: df517e39b7c81e3067f794040c1c5450f0944e2d3a490c7746304343e5b62eb1
 /// coordinator: wasabicoordinator, stratum: medium
-/// N_in=29, N_out=35, fee=99091
+/// `N_in=29`, `N_out=35`, fee=99091
+#[must_use]
 pub fn wasabi2_pos_df517e39_29in35out() -> Transaction {
     Transaction::new(
         vec![
@@ -583,7 +613,8 @@ pub fn wasabi2_pos_df517e39_29in35out() -> Transaction {
 
 /// txid: e00357c5f61c90c097fb424be95cb85fc94fbf4b3a1278f50021fde1c512d8e9
 /// coordinator: kruw, stratum: large
-/// N_in=81, N_out=109, fee=275315
+/// `N_in=81`, `N_out=109`, fee=275315
+#[must_use]
 pub fn wasabi2_pos_e00357c5_81in109out() -> Transaction {
     Transaction::new(
         vec![
@@ -615,7 +646,8 @@ pub fn wasabi2_pos_e00357c5_81in109out() -> Transaction {
 
 /// txid: e8ab4e3f1c0133cc1cccf6f9f6dd499cb31fb07ff1b2e27e64b4b9d9750188ca
 /// coordinator: kruw, stratum: medium
-/// N_in=24, N_out=21, fee=55947
+/// `N_in=24`, `N_out=21`, fee=55947
+#[must_use]
 pub fn wasabi2_pos_e8ab4e3f_24in21out() -> Transaction {
     Transaction::new(
         vec![
@@ -633,7 +665,8 @@ pub fn wasabi2_pos_e8ab4e3f_24in21out() -> Transaction {
 
 /// txid: ea543f165bf2dc7aa726eb4e8e55f7830232378d93e0f18231bedd19b86b78a5
 /// coordinator: kruw, stratum: small
-/// N_in=20, N_out=25, fee=64638
+/// `N_in=20`, `N_out=25`, fee=64638
+#[must_use]
 pub fn wasabi2_pos_ea543f16_20in25out() -> Transaction {
     Transaction::new(
         vec![
@@ -650,7 +683,8 @@ pub fn wasabi2_pos_ea543f16_20in25out() -> Transaction {
 
 /// txid: ed7d10044a02e9fb748c6b5666d1b848b60d6b480a97b42d8ac6a4d5f3b5a4d7
 /// coordinator: wasabicoordinator, stratum: small
-/// N_in=20, N_out=21, fee=30199
+/// `N_in=20`, `N_out=21`, fee=30199
+#[must_use]
 pub fn wasabi2_pos_ed7d1004_20in21out() -> Transaction {
     Transaction::new(
         vec![
@@ -665,6 +699,7 @@ pub fn wasabi2_pos_ed7d1004_20in21out() -> Transaction {
     )
 }
 
+#[must_use]
 pub fn all_wasabi2_positive_cjtxs() -> Vec<(&'static str, Transaction)> {
     vec![
         ("w2pos_03b4bd61_20in34out", wasabi2_pos_03b4bd61_20in34out()),
