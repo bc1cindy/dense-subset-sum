@@ -6,7 +6,7 @@ pub mod loss;
 pub use loss::LossError;
 
 pub use ambiguity::Ambiguity;
-pub use compute::{DEFAULT_MEMORY_BUDGET, KNEE, radix_mappings, w_brute, w_sparse};
+pub use compute::{DEFAULT_MEMORY_BUDGET, KNEE, radix_mappings, w_brute, w_sasamoto, w_sparse};
 
 pub use count::density_regime::{
     Bracket, Interval, L, MAX_MONEY, Regime, kappa, kappa_c, regime_at_l, worst_case_kappa,
