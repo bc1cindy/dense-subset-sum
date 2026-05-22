@@ -12,7 +12,7 @@ A CoinJoin publishes a list of inputs and a list of outputs. An outside observer
 
 The core question is: *how many alternative mappings are there?* Counting them directly is exponential, so this tool uses `W(E)` — the number of input subsets summing to a given amount `E` — as the privacy primitive. A transaction with many subsets reaching its sub-sums has many possible decompositions, so many mappings, so good privacy.
 
-Computing `W(E)` exactly is also exponential in the worst case, so the tool runs a **4-tier dispatch**:
+Computing `W(E)` exactly is also exponential in the worst case, so the tool exposes **four counting primitives**, picked by the caller:
 
 1. **Brute force / DP** — small N (exponential enumeration is tractable).
 2. **Radix** — independent of N, exploits output structure; counts `Σ k × m!` mappings.
@@ -35,7 +35,7 @@ Computing `W(E)` exactly is also exponential in the worst case, so the tool runs
 
 ## References
 
-1. Yuval Kogman ([nothingmuch](https://github.com/nothingmuch)) — Radix.
+1. Yuval Kogman ([nothingmuch](https://github.com/nothingmuch))
 2. Sasamoto, Toyoizumi, Nishimori — *Statistical Mechanics of Subset Sum* ([arxiv:cond-mat/0106125](https://arxiv.org/pdf/cond-mat/0106125)).
 3. Maurer, Neudecker, Florian — *Anonymous CoinJoin Transactions with Arbitrary Values* (2017).
 4. Maxwell — *CoinJoin: Bitcoin privacy for the real world* (bitcointalk, 2013).
