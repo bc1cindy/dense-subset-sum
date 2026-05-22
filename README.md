@@ -15,7 +15,7 @@ The core question is: *how many alternative mappings are there?* Counting them d
 Computing `W(E)` exactly is also exponential in the worst case, so the tool runs a **4-tier dispatch**:
 
 1. **Brute force / DP** — small N (exponential enumeration is tractable).
-2. **Radix** — (Yuval Kogman) independent of N, exploits output structure; counts `Σ k × m!` mappings.
+2. **Radix** — independent of N, exploits output structure; counts `Σ k × m!` mappings.
 3. **Sparse convolution** — medium N (scales until the sumset table blows up).
 4. **Asymptotic approximation** (Sasamoto / Toyoizumi / Nishimori) — large N (asymptotic, not valid for small W).
 
