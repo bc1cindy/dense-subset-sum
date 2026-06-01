@@ -148,20 +148,29 @@ pub fn w_sasamoto(inputs: &[u64], outputs: &[u64]) -> Ambiguity {
     peak.into()
 }
 
-/// Non-empty output subset sums; `None` when `outputs.len() > 63` exceeds u64 mask width.
+/// Distinct non-empty output subset sums.
+///
+/// Computed by a reachability DP in O(n · |reachable|): start from {0} and, for each output, fold
+/// in every existing sum plus that output. Feasible for dense/denominated outputs — subsets collide,
+/// so the reachable set stays small even when n is large — where the old 2^n mask enumeration was
+/// not (it OOM'd and capped at n > 63). Returns `None` when the reachable set exceeds the budget:
+/// that is the sparse regime, where the subset-sum count is intractable anyway and callers degrade
+/// to `Unknown`.
 pub(crate) fn output_subsums(outputs: &[u64]) -> Option<HashSet<u64>> {
-    let n = outputs.len();
-    if n > 63 {
-        return None;
+    const REACHABLE_BUDGET: usize = 1 << 22; // ~4M distinct sums ≈ tens of MB
+    let mut sums: HashSet<u64> = HashSet::new();
+    sums.insert(0);
+    for &v in outputs {
+        if v == 0 {
+            continue; // adding 0 never reaches a new sum
+        }
+        let additions: Vec<u64> = sums.iter().map(|&s| s.saturating_add(v)).collect();
+        sums.extend(additions);
+        if sums.len() > REACHABLE_BUDGET {
+            return None;
+        }
     }
-    let mut sums = HashSet::with_capacity(1usize << n);
-    for mask in 1u64..(1u64 << n) {
-        let s: u64 = (0..n)
-            .filter(|i| mask & (1 << i) != 0)
-            .map(|i| outputs[i])
-            .sum();
-        sums.insert(s);
-    }
+    sums.remove(&0); // exclude the empty subset
     Some(sums)
 }
 
@@ -227,7 +236,58 @@ mod tests {
         assert_eq!(radix_mappings(&[1000, 1000], 6), Ambiguity::Exact(4));
     }
 
+    fn naive_output_subsums(outputs: &[u64]) -> HashSet<u64> {
+        let n = outputs.len();
+        let mut sums = HashSet::new();
+        for mask in 1u64..(1u64 << n) {
+            let s: u64 = (0..n).filter(|i| mask & (1 << i) != 0).map(|i| outputs[i]).sum();
+            sums.insert(s);
+        }
+        sums
+    }
+
+    #[test]
+    fn output_subsums_matches_naive_on_small_sets() {
+        for outputs in [
+            vec![1u64, 2, 3],
+            vec![5, 5, 5, 5],
+            vec![512, 512, 1024, 2048],
+            vec![1, 10, 100, 1000, 10],
+        ] {
+            assert_eq!(output_subsums(&outputs).unwrap(), naive_output_subsums(&outputs));
+        }
+    }
+
+    #[test]
+    fn output_subsums_scales_to_large_dense_set() {
+        // 40 denominated outputs — far past the old 2^n / n<=63 enumeration — but few DISTINCT
+        // subset sums because the values collide. The DP returns the exact set cheaply.
+        let outputs: Vec<u64> = std::iter::repeat(131_072u64)
+            .take(20)
+            .chain(std::iter::repeat(262_144u64).take(20))
+            .collect();
+        let sums = output_subsums(&outputs).expect("dense set must be tractable");
+        assert!(sums.len() < 2000, "expected few distinct sums, got {}", sums.len());
+        assert!(sums.contains(&131_072));
+        assert!(sums.contains(&(20 * 131_072 + 20 * 262_144)));
+    }
+
+    #[test]
+    fn output_subsums_returns_none_when_intractable() {
+        // 40 distinct powers of two never collide, so the reachable set explodes past the budget —
+        // the sparse regime. Returns None (the old enumeration would have hung at 2^40).
+        let outputs: Vec<u64> = (1..=40u64).map(|i| 1u64 << i).collect();
+        assert!(output_subsums(&outputs).is_none());
+    }
+
     proptest! {
+        #[test]
+        fn output_subsums_dp_equals_naive(
+            outputs in prop::collection::vec(1u64..=64, 1..=10),
+        ) {
+            prop_assert_eq!(output_subsums(&outputs).unwrap(), naive_output_subsums(&outputs));
+        }
+
         #[test]
         fn w_brute_monotonic_in_max_size(
             inputs in prop::collection::vec(1u64..=100, 1..=6),
