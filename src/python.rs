@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use crate::{Transaction, kappa, KNEE};
-use crate::harness::vs_cja::per_coin_measurements;
+use crate::harness::vs_cja::per_coin_measurements_fee_aware;
 
 #[pyfunction]
 fn per_coin_density(py: Python<'_>, inputs: Vec<u64>, outputs: Vec<u64>) -> PyResult<Py<PyDict>> {
@@ -11,7 +11,7 @@ fn per_coin_density(py: Python<'_>, inputs: Vec<u64>, outputs: Vec<u64>) -> PyRe
     let kap = kappa(max_in, n_in);
 
     let coins = PyList::empty_bound(py);
-    for m in per_coin_measurements(&tx, KNEE) {
+    for m in per_coin_measurements_fee_aware(&tx, KNEE) {
         let d = PyDict::new_bound(py);
         d.set_item("role", m.role.as_str())?;
         d.set_item("index", m.index)?;
