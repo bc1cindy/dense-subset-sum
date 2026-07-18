@@ -1,3 +1,6 @@
+#[cfg(feature = "python")]
+mod python;
+
 pub mod ambiguity;
 pub mod compute;
 pub mod count;
