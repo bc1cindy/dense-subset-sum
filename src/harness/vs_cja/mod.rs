@@ -1,7 +1,10 @@
 //! Cross-validation of estimators against brute force and CJA mappings.
 
 pub use density_sweep::{SubsetDensityPoint, print_subset_density_sweep, subset_density_sweep};
-pub use mappings::{boltzmann_entropy, deterministic_links, pairwise_input_output_prob};
+pub use mappings::{
+    boltzmann_entropy, deterministic_links, enumerate_mappings, non_derived_mappings,
+    pairwise_input_output_prob,
+};
 pub use mappings_pipeline::{
     FeeHandling, MappingComparison, MappingCorrelation, ValidationSummary, compare_w_vs_mappings,
     compare_w_vs_mappings_with, correlate_w_vs_mappings, print_mapping_comparison,
