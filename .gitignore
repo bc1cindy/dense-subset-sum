@@ -1,2 +1,3 @@
 /target
 testdata/*.bin
+__pycache__/
