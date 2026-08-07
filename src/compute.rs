@@ -240,7 +240,10 @@ mod tests {
         let n = outputs.len();
         let mut sums = HashSet::new();
         for mask in 1u64..(1u64 << n) {
-            let s: u64 = (0..n).filter(|i| mask & (1 << i) != 0).map(|i| outputs[i]).sum();
+            let s: u64 = (0..n)
+                .filter(|i| mask & (1 << i) != 0)
+                .map(|i| outputs[i])
+                .sum();
             sums.insert(s);
         }
         sums
@@ -254,7 +257,10 @@ mod tests {
             vec![512, 512, 1024, 2048],
             vec![1, 10, 100, 1000, 10],
         ] {
-            assert_eq!(output_subsums(&outputs).unwrap(), naive_output_subsums(&outputs));
+            assert_eq!(
+                output_subsums(&outputs).unwrap(),
+                naive_output_subsums(&outputs)
+            );
         }
     }
 
@@ -267,7 +273,11 @@ mod tests {
             .chain(std::iter::repeat(262_144u64).take(20))
             .collect();
         let sums = output_subsums(&outputs).expect("dense set must be tractable");
-        assert!(sums.len() < 2000, "expected few distinct sums, got {}", sums.len());
+        assert!(
+            sums.len() < 2000,
+            "expected few distinct sums, got {}",
+            sums.len()
+        );
         assert!(sums.contains(&131_072));
         assert!(sums.contains(&(20 * 131_072 + 20 * 262_144)));
     }

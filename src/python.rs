@@ -1,8 +1,10 @@
+use crate::harness::vs_cja::per_coin_measurements_fee_aware;
+use crate::harness::vs_cja::{
+    enumerate_mappings, non_derived_mappings, pairwise_input_output_prob,
+};
+use crate::{KNEE, Transaction, kappa};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
-use crate::{Transaction, kappa, KNEE};
-use crate::harness::vs_cja::per_coin_measurements_fee_aware;
-use crate::harness::vs_cja::{enumerate_mappings, non_derived_mappings, pairwise_input_output_prob};
 
 #[pyfunction]
 fn per_coin_density(py: Python<'_>, inputs: Vec<u64>, outputs: Vec<u64>) -> PyResult<Py<PyDict>> {
@@ -50,7 +52,7 @@ fn pairwise_link_prob(
     // then drop the fee column so the returned matrix is n_inputs x n_real_outputs.
     let balanced = if fee > 0 {
         let mut outs = tx.outputs.clone();
-        outs.push(fee as u64);   // fee > 0 here and fee: i64 from Σin−Σout, so the cast is exact
+        outs.push(fee as u64); // fee > 0 here and fee: i64 from Σin−Σout, so the cast is exact
         Transaction::new(tx.inputs.clone(), outs)
     } else {
         tx.clone()
