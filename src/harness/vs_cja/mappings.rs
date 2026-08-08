@@ -189,6 +189,33 @@ pub fn pairwise_input_output_prob(non_derived: &[Mapping], tx: &Transaction) -> 
     matrix
 }
 
+/// Structural dense-coinjoin recognizer (the transcript's Radix case): a large instance whose
+/// outputs are dominated by repeated denominations (>=3 of a value) is dense by construction, so
+/// its link matrix is uniform (max ambiguity). O(n) — avoids the slow per-output saddle-point of
+/// the density regime, which does NOT classify real coinjoins Dense and hangs on wide ones.
+#[must_use]
+pub fn dense_uniform_matrix(
+    inputs: &[u64],
+    real_outputs: &[u64],
+    min_coins: usize,
+) -> Option<Vec<Vec<f64>>> {
+    if inputs.len() + real_outputs.len() <= min_coins {
+        return None;
+    }
+    use std::collections::HashMap;
+    let mut mult: HashMap<u64, usize> = HashMap::new();
+    for &v in real_outputs {
+        *mult.entry(v).or_insert(0) += 1;
+    }
+    let repeated_denoms = mult.values().filter(|&&c| c >= 3).count();
+    let covered: usize = mult.values().filter(|&&c| c >= 3).sum();
+    // >=2 distinct denominations each repeated >=3x, covering >=half the outputs => coinjoin-dense.
+    if repeated_denoms >= 2 && covered * 2 >= real_outputs.len() {
+        return Some(vec![vec![1.0f64; real_outputs.len()]; inputs.len()]);
+    }
+    None
+}
+
 /// Pairs `(input_idx, output_idx)` linked in **every** non-derived mapping
 /// (`p_IO == 1.0`). Each pair represents a coin with anonymity zero: the
 /// attacker can pin it without ambiguity, even when `n_non_derived` is large.
@@ -307,6 +334,39 @@ fn canonical_parts(m: &Mapping) -> Vec<(Vec<u64>, Vec<u64>)> {
 mod tests {
     use super::*;
     use crate::fixtures;
+
+    #[test]
+    fn dense_uniform_matrix_fires_on_repeated_denomination_coinjoin() {
+        use super::dense_uniform_matrix;
+        let inputs: Vec<u64> = (0..12).map(|k| 1_000_000 + k).collect();
+        let mut outputs: Vec<u64> = Vec::new();
+        for _ in 0..8 {
+            outputs.push(20_000);
+        }
+        for _ in 0..8 {
+            outputs.push(2_097_152);
+        }
+        for _ in 0..4 {
+            outputs.push(5_000_000);
+        } // 20 outputs, 3 repeated denoms cover all
+        let m = dense_uniform_matrix(&inputs, &outputs, 15).expect("repeated-denom coinjoin fires");
+        assert_eq!(m.len(), inputs.len());
+        assert_eq!(m[0].len(), outputs.len());
+        assert!(m.iter().flatten().all(|&v| v == 1.0));
+        assert!(
+            dense_uniform_matrix(&[500_000, 500_000], &[900_000, 90_000], 15).is_none(),
+            "payment must not fire"
+        );
+        let distinct: Vec<u64> = (1..=40).map(|k| k * 111_113).collect();
+        assert!(
+            dense_uniform_matrix(&vec![1_000_000u64; 5], &distinct, 15).is_none(),
+            "distinct-large must not fire"
+        );
+        assert!(
+            dense_uniform_matrix(&[3, 5], &[8], 15).is_none(),
+            "small must not fire"
+        );
+    }
 
     #[test]
     fn test_maurer_fig2_mappings() {

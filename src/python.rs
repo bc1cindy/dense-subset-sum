@@ -1,6 +1,7 @@
 use crate::harness::vs_cja::per_coin_measurements_fee_aware;
 use crate::harness::vs_cja::{
-    enumerate_mappings_within, non_derived_mappings_within, pairwise_input_output_prob,
+    dense_uniform_matrix, enumerate_mappings_within, non_derived_mappings_within,
+    pairwise_input_output_prob,
 };
 use crate::{KNEE, Transaction, kappa};
 use pyo3::prelude::*;
@@ -61,6 +62,20 @@ fn pairwise_link_prob(
     let fee = tx.fee();
     if fee < 0 {
         return Ok(None);
+    }
+    // Dense-coinjoin fast path: a dense instance's link matrix is uniform (max ambiguity),
+    // so emit it directly rather than running the exponential enumeration below.
+    const RADIX_MIN: usize = 15;
+    if let Some(m) = dense_uniform_matrix(&tx.inputs, &tx.outputs, RADIX_MIN) {
+        let rows = PyList::empty_bound(py);
+        for row in m {
+            let r = PyList::empty_bound(py);
+            for v in row {
+                r.append(v)?;
+            }
+            rows.append(r)?;
+        }
+        return Ok(Some(rows.unbind()));
     }
     // Balance by appending the fee as an extra output (mirrors the fee-aware pipeline), enumerate,
     // then drop the fee column so the returned matrix is n_inputs x n_real_outputs.
