@@ -3,9 +3,60 @@ use crate::harness::vs_cja::{
     dense_uniform_matrix, enumerate_mappings_within, non_derived_mappings_within,
     pairwise_input_output_prob,
 };
-use crate::{KNEE, Transaction, kappa};
+use crate::{Ambiguity, KNEE, Transaction, kappa};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+use std::num::NonZeroUsize;
+
+fn ambiguity_to_dict(py: Python<'_>, amb: Ambiguity) -> PyResult<Py<PyDict>> {
+    let d = PyDict::new_bound(py);
+    let kind = match amb {
+        Ambiguity::Exact(_) => "exact",
+        Ambiguity::LowerBound(_) => "lower_bound",
+        Ambiguity::LogApprox(_) => "log_approx",
+        Ambiguity::Unknown => "unknown",
+    };
+    d.set_item("kind", kind)?;
+    d.set_item("count", amb.lower_bound_count())?; // Option<u128> -> int | None, no truncation
+    d.set_item("log_w", amb.log())?;
+    Ok(d.unbind())
+}
+
+#[pyfunction]
+fn w_brute(
+    py: Python<'_>,
+    inputs: Vec<u64>,
+    outputs: Vec<u64>,
+    max_size: usize,
+) -> PyResult<Py<PyDict>> {
+    ambiguity_to_dict(py, crate::compute::w_brute(&inputs, &outputs, max_size))
+}
+
+#[pyfunction]
+fn radix_mappings(py: Python<'_>, outputs: Vec<u64>, max_size: usize) -> PyResult<Py<PyDict>> {
+    ambiguity_to_dict(py, crate::compute::radix_mappings(&outputs, max_size))
+}
+
+#[pyfunction]
+#[pyo3(signature = (inputs, outputs, max_size, memory_budget=1_048_576))]
+fn w_sparse(
+    py: Python<'_>,
+    inputs: Vec<u64>,
+    outputs: Vec<u64>,
+    max_size: usize,
+    memory_budget: usize,
+) -> PyResult<Py<PyDict>> {
+    let mb = NonZeroUsize::new(memory_budget.max(1)).unwrap();
+    ambiguity_to_dict(
+        py,
+        crate::compute::w_sparse(&inputs, &outputs, max_size, mb),
+    )
+}
+
+#[pyfunction]
+fn w_sasamoto(py: Python<'_>, inputs: Vec<u64>, outputs: Vec<u64>) -> PyResult<Py<PyDict>> {
+    ambiguity_to_dict(py, crate::compute::w_sasamoto(&inputs, &outputs))
+}
 
 #[pyfunction]
 fn per_coin_density(py: Python<'_>, inputs: Vec<u64>, outputs: Vec<u64>) -> PyResult<Py<PyDict>> {
@@ -108,5 +159,9 @@ fn pairwise_link_prob(
 fn dss(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(per_coin_density, m)?)?;
     m.add_function(wrap_pyfunction!(pairwise_link_prob, m)?)?;
+    m.add_function(wrap_pyfunction!(w_brute, m)?)?;
+    m.add_function(wrap_pyfunction!(radix_mappings, m)?)?;
+    m.add_function(wrap_pyfunction!(w_sparse, m)?)?;
+    m.add_function(wrap_pyfunction!(w_sasamoto, m)?)?;
     Ok(())
 }
