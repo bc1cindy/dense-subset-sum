@@ -4,6 +4,8 @@ use coinjoin_analyzer::{
     Partition, PartitionsSubsetSumsFilter, SubsetSumsFilter, SumFilteredPartitionIterator,
 };
 
+use std::time::Instant;
+
 use crate::Transaction;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,36 +22,68 @@ impl Mapping {
 
 /// Exponential in total coin count — practical up to ~25 coins.
 pub fn enumerate_mappings(tx: &Transaction) -> Vec<Mapping> {
+    enumerate_mappings_within(tx, None).expect("no deadline can not expire")
+}
+
+/// The same enumeration under a wall-clock deadline, `None` when it expires.
+///
+/// Coin count is a poor predictor of this cost: measured over one real provenance
+/// walk, calls of the same total size ranged from 54ms to 69s, the slow one being
+/// 12 inputs against 17 outputs of which nine shared a value. Repeated values
+/// multiply the partitions, and neither the count, the density, nor the per-coin
+/// weight separates the cheap case from the expensive one. A deadline bounds what
+/// the caller actually cares about; a size limit only bounds a proxy for it.
+///
+/// Expiry is checked between partitions rather than inside the iterator, so the
+/// bound is honoured to within one partition's work and never mid-structure.
+pub fn enumerate_mappings_within(
+    tx: &Transaction,
+    deadline: Option<Instant>,
+) -> Option<Vec<Mapping>> {
+    let expired = || deadline.is_some_and(|d| Instant::now() >= d);
     if tx.inputs.is_empty() || tx.outputs.is_empty() {
-        return vec![];
+        return Some(vec![]);
     }
 
     // CJA's BloomFilter panics on sets with < 2 elements.
     if tx.inputs.len() == 1 || tx.outputs.len() == 1 {
         if tx.input_sum() == tx.output_sum() {
-            return vec![Mapping {
+            return Some(vec![Mapping {
                 input_sets: vec![tx.inputs.clone()],
                 output_sets: vec![tx.outputs.clone()],
-            }];
+            }]);
         } else {
-            return vec![];
+            return Some(vec![]);
         }
     }
 
     let out_filter = SubsetSumsFilter::new(&tx.outputs);
-    let in_partitions: Vec<Partition> =
-        SumFilteredPartitionIterator::new(tx.inputs.clone(), &out_filter).collect();
+    let mut in_partitions: Vec<Partition> = Vec::new();
+    for partition in SumFilteredPartitionIterator::new(tx.inputs.clone(), &out_filter) {
+        if expired() {
+            return None;
+        }
+        in_partitions.push(partition);
+    }
 
     if in_partitions.is_empty() {
-        return vec![];
+        return Some(vec![]);
     }
 
     let in_parts_filter = PartitionsSubsetSumsFilter::new(&in_partitions);
-    let out_partitions: Vec<Partition> =
-        SumFilteredPartitionIterator::new(tx.outputs.clone(), &in_parts_filter).collect();
+    let mut out_partitions: Vec<Partition> = Vec::new();
+    for partition in SumFilteredPartitionIterator::new(tx.outputs.clone(), &in_parts_filter) {
+        if expired() {
+            return None;
+        }
+        out_partitions.push(partition);
+    }
 
     let mut mappings = Vec::new();
     for in_partition in &in_partitions {
+        if expired() {
+            return None;
+        }
         for out_partition in &out_partitions {
             if partitions_match(in_partition, out_partition) {
                 let (aligned_in, aligned_out) = align_partitions(in_partition, out_partition);
@@ -61,7 +95,7 @@ pub fn enumerate_mappings(tx: &Transaction) -> Vec<Mapping> {
         }
     }
 
-    mappings
+    Some(mappings)
 }
 
 /// Derived = obtainable by merging two sub-txs of a mapping with one more sub-tx.
@@ -84,11 +118,28 @@ pub fn is_derived(mapping: &Mapping, all_mappings: &[Mapping]) -> bool {
 }
 
 pub fn non_derived_mappings(mappings: &[Mapping]) -> Vec<Mapping> {
-    mappings
-        .iter()
-        .filter(|m| !is_derived(m, mappings))
-        .cloned()
-        .collect()
+    non_derived_mappings_within(mappings, None).expect("no deadline can not expire")
+}
+
+/// The same filter under a deadline, `None` when it expires.
+///
+/// This half is quadratic in the mapping count and can dominate the enumeration
+/// that produced it, so a deadline covering only the enumeration would bound the
+/// cheaper phase and leave the expensive one running.
+pub fn non_derived_mappings_within(
+    mappings: &[Mapping],
+    deadline: Option<Instant>,
+) -> Option<Vec<Mapping>> {
+    let mut out = Vec::new();
+    for mapping in mappings {
+        if deadline.is_some_and(|d| Instant::now() >= d) {
+            return None;
+        }
+        if !is_derived(mapping, mappings) {
+            out.push(mapping.clone());
+        }
+    }
+    Some(out)
 }
 
 /// Maurer/Boltzmann entropy in bits: `log₂(n_non_derived)`. Returns `0.0` when count ≤ 1
@@ -361,5 +412,24 @@ mod tests {
         assert_eq!(p, vec![vec![0.0]]);
         let links = deterministic_links(&[], &tx);
         assert!(links.is_empty());
+    }
+
+    #[test]
+    fn test_deadline_expired_returns_none() {
+        let tx = fixtures::equal_denominations();
+        let past = Instant::now() - std::time::Duration::from_secs(1);
+        assert!(enumerate_mappings_within(&tx, Some(past)).is_none());
+        let all = enumerate_mappings(&tx);
+        assert!(non_derived_mappings_within(&all, Some(past)).is_none());
+    }
+
+    #[test]
+    fn test_generous_deadline_matches_unbounded() {
+        let tx = fixtures::maurer_fig2();
+        let far = Instant::now() + std::time::Duration::from_secs(60);
+        let bounded = enumerate_mappings_within(&tx, Some(far)).unwrap();
+        assert_eq!(bounded, enumerate_mappings(&tx));
+        let nd = non_derived_mappings_within(&bounded, Some(far)).unwrap();
+        assert_eq!(nd, non_derived_mappings(&bounded));
     }
 }
