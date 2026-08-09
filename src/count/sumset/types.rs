@@ -42,6 +42,11 @@ pub(crate) const fn classify(visible: u32, truncated: bool) -> Count {
     match (visible, truncated) {
         (0, false) => Count::Absent,
         (0, true) => Count::Unknown,
+        // A saturated u32 counter is a LOWER BOUND, not an exact value: the true count is >= u32::MAX
+        // (the counter clamped). Reporting it Confirmed/Exact would understate the magnitude and claim
+        // exactness it doesn't have — so saturation is a `Truncated` (lower-bound) count regardless of
+        // whether the sumset itself was memory-truncated.
+        (u32::MAX, _) => Count::Truncated(u32::MAX),
         (n, false) => Count::Confirmed(n),
         (n, true) => Count::Truncated(n),
     }
@@ -106,6 +111,16 @@ mod tests {
         assert_eq!(classify(0, true), Count::Unknown);
         assert_eq!(classify(7, false), Count::Confirmed(7));
         assert_eq!(classify(7, true), Count::Truncated(7));
+    }
+
+    #[test]
+    fn classify_saturated_count_is_lower_bound_not_exact() {
+        // A saturated u32 counter means the true count >= u32::MAX (the counter clamped) — a lower
+        // bound, never an exact value, even when the sumset itself was not memory-truncated.
+        assert_eq!(classify(u32::MAX, false), Count::Truncated(u32::MAX));
+        assert_eq!(classify(u32::MAX, true), Count::Truncated(u32::MAX));
+        assert_eq!(classify(u32::MAX, false).bound(), Bound::LowerBound);
+        assert!(!classify(u32::MAX, false).is_exact());
     }
 
     #[test]
