@@ -4,7 +4,7 @@
 use crate::Ambiguity;
 use crate::count::companion::sasamoto_approx;
 use crate::count::denoms::standard_denoms_in_range;
-use crate::count::oracle::{BruteError, brute_force_w_restricted};
+use crate::count::oracle::{BruteError, DpError, brute_force_w_restricted, dp_w_restricted};
 use crate::count::radix::{
     DEFAULT_MAX_DENOM_SATS, DEFAULT_MIN_DENOM_SATS, radix_decompose, radix_mapping_count,
 };
@@ -83,6 +83,42 @@ pub fn radix_mappings(outputs: &[u64], max_size: usize) -> Ambiguity {
         }
     }
     Ambiguity::Exact(total)
+}
+
+/// Exact `Σ_{E ∈ output_subsums} Σ_{m=1..=max_size} W(m, E)` via the pseudo-polynomial DP oracle
+/// [`dp_w_restricted`]; excludes the trivial full-input mapping, same as [`w_brute`]/[`w_sparse`].
+/// Covers small-reachable-sum transactions exactly where `w_brute`'s `N ≤ 20` enumeration can't
+/// reach. `Ambiguity::Unknown` when `output_subsums` returns `None`, or when any DP call exceeds
+/// `max_cells` (budget/size overflow) — never a wrong count or a panic.
+#[must_use]
+pub fn w_dp(inputs: &[u64], outputs: &[u64], max_size: usize, max_cells: usize) -> Ambiguity {
+    if inputs.is_empty() || outputs.is_empty() || max_size == 0 {
+        return Ambiguity::Exact(0);
+    }
+    let Some(targets) = output_subsums(outputs) else {
+        return Ambiguity::Unknown;
+    };
+    let n_in = inputs.len();
+    let full_input_sum: u64 = inputs.iter().sum();
+    let cap = max_size.min(n_in);
+    let mut count: u128 = 0;
+    for &target in &targets {
+        for m in 1..=cap {
+            match dp_w_restricted(inputs, m, target, max_cells) {
+                Ok(w) => {
+                    let mut delta = w;
+                    if m == n_in && target == full_input_sum {
+                        delta = delta.saturating_sub(1);
+                    }
+                    count = count.saturating_add(delta);
+                }
+                Err(DpError::ExceedsBudget | DpError::SumOverflow | DpError::EmptyOrAllZero) => {
+                    return Ambiguity::Unknown;
+                }
+            }
+        }
+    }
+    Ambiguity::Exact(count)
 }
 
 /// Count via sparse convolution (Bringmann/Fischer/Nakos arXiv:2107.07625). Returns
@@ -208,6 +244,57 @@ mod tests {
     }
 
     #[test]
+    fn w_dp_matches_brute_on_small() {
+        let cases: &[(&[u64], &[u64])] = &[
+            (&[500, 300], &[500, 300]),
+            (&[100, 200, 300], &[150, 150, 200, 100]),
+            (&[500, 300], &[500]),
+            (&[1, 2, 3, 4], &[1, 2, 3, 4]),
+            (&[10, 20, 30], &[10, 20, 30, 40]),
+        ];
+        for &(inputs, outputs) in cases {
+            let brute = w_brute(inputs, outputs, 8);
+            let dp = w_dp(inputs, outputs, 8, 1_000_000);
+            assert_eq!(dp, brute, "inputs={inputs:?} outputs={outputs:?}");
+        }
+        assert_eq!(w_brute(&[500, 300], &[500, 300], 8), Ambiguity::Exact(2));
+        assert_eq!(
+            w_dp(&[500, 300], &[500, 300], 8, 1_000_000),
+            Ambiguity::Exact(2)
+        );
+    }
+
+    #[test]
+    fn w_dp_matches_sparse_on_small() {
+        let cases: &[(&[u64], &[u64])] = &[
+            (&[500, 300], &[500, 300]),
+            (&[100, 200, 300], &[150, 150, 200, 100]),
+            (&[500, 300], &[500]),
+            (&[1, 2, 3, 4], &[1, 2, 3, 4]),
+            (&[10, 20, 30], &[10, 20, 30, 40]),
+        ];
+        for &(inputs, outputs) in cases {
+            let sparse = w_sparse(inputs, outputs, 8, DEFAULT_MEMORY_BUDGET);
+            let dp = w_dp(inputs, outputs, 8, 1_000_000);
+            assert_eq!(dp, sparse, "inputs={inputs:?} outputs={outputs:?}");
+        }
+    }
+
+    #[test]
+    fn w_dp_budget_exceeded_is_unknown() {
+        let inputs: Vec<u64> = (1..=12).collect();
+        let outputs: Vec<u64> = (1..=12).collect();
+        assert_eq!(w_dp(&inputs, &outputs, 8, 4), Ambiguity::Unknown);
+    }
+
+    #[test]
+    fn w_dp_empty_is_zero() {
+        assert_eq!(w_dp(&[], &[5, 10], 8, 1_000_000), Ambiguity::Exact(0));
+        assert_eq!(w_dp(&[5, 10], &[], 8, 1_000_000), Ambiguity::Exact(0));
+        assert_eq!(w_dp(&[1], &[1], 0, 1_000_000), Ambiguity::Exact(0));
+    }
+
+    #[test]
     fn w_sparse_empty_is_zero_exact() {
         assert_eq!(w_sparse(&[], &[5, 10], 4, nz(1000)), Ambiguity::Exact(0));
         assert_eq!(w_sparse(&[5, 10], &[], 4, nz(1000)), Ambiguity::Exact(0));
@@ -317,6 +404,16 @@ mod tests {
             outputs in prop::collection::vec(1u64..=100, 1..=4),
         ) {
             prop_assert_eq!(w_brute(&inputs, &outputs, 0), Ambiguity::Exact(0));
+        }
+
+        #[test]
+        fn w_dp_agrees_with_brute(
+            inputs in prop::collection::vec(1u64..=30, 1..=8),
+            outputs in prop::collection::vec(1u64..=30, 1..=8),
+        ) {
+            let brute = w_brute(&inputs, &outputs, inputs.len());
+            let dp = w_dp(&inputs, &outputs, inputs.len(), 1_000_000);
+            prop_assert_eq!(dp, brute);
         }
 
         #[test]
