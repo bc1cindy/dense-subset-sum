@@ -58,6 +58,25 @@ fn w_sasamoto(py: Python<'_>, inputs: Vec<u64>, outputs: Vec<u64>) -> PyResult<P
     ambiguity_to_dict(py, crate::compute::w_sasamoto(&inputs, &outputs))
 }
 
+/// Feasibility-cascade dispatcher over the four W(E) paths: brute -> dp -> sparse -> sasamoto,
+/// returning the best available `Ambiguity` (kind/count/log_w) plus the `method` string that produced
+/// it ("brute"|"dp"|"sparse"|"sasamoto"|"none").
+#[pyfunction]
+fn w_count(py: Python<'_>, inputs: Vec<u64>, outputs: Vec<u64>) -> PyResult<Py<PyDict>> {
+    use crate::compute::Method;
+    let report = crate::compute::w_count(&inputs, &outputs);
+    let d = ambiguity_to_dict(py, report.ambiguity)?;
+    let method = match report.method {
+        Method::Brute => "brute",
+        Method::Dp => "dp",
+        Method::Sparse => "sparse",
+        Method::Sasamoto => "sasamoto",
+        Method::None => "none",
+    };
+    d.bind(py).set_item("method", method)?;
+    Ok(d)
+}
+
 #[pyfunction]
 fn per_coin_density(py: Python<'_>, inputs: Vec<u64>, outputs: Vec<u64>) -> PyResult<Py<PyDict>> {
     let tx = Transaction::new(inputs.clone(), outputs);
@@ -163,5 +182,6 @@ fn dss(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(radix_mappings, m)?)?;
     m.add_function(wrap_pyfunction!(w_sparse, m)?)?;
     m.add_function(wrap_pyfunction!(w_sasamoto, m)?)?;
+    m.add_function(wrap_pyfunction!(w_count, m)?)?;
     Ok(())
 }
