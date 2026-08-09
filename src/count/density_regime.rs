@@ -142,7 +142,7 @@ pub fn kappa_c(e: u64, n: usize, l: u64) -> Option<f64> {
     if !(0.0 < x && x <= 1.0) {
         return None;
     }
-    Some(kappa_c_at(x))
+    kappa_c_at(x)
 }
 
 /// Dense iff κ < `κ_c` at worst-case L; Sparse iff κ ≥ `κ_c` at best-case L; else Transitional.
@@ -264,15 +264,32 @@ impl std::fmt::Display for Bracket {
     }
 }
 
-/// `κ_c(x)` per eq (4.2, 4.3); symmetric about 1/2, peaks `κ_c(1/4)=1`.
-fn kappa_c_at(x: f64) -> f64 {
+/// `κ_c(x)` per eq (4.2, 4.3); symmetric about 1/2, peaks `κ_c(1/4)=1`. `None` when the saddle-point
+/// `α` leaves the finite solver bracket (near x = 1/2, `α → -∞`): there `find_alpha` is undefined, so
+/// κ_c is not reliably computable and callers must degrade to `Unknown` rather than panic.
+fn kappa_c_at(x: f64) -> Option<f64> {
     let x = if x > 0.5 { 1.0 - x } else { x };
     // eq (4.3) at x = 1/2: α → -∞, integrand cancels.
     if x == 0.5 {
-        return 0.0;
+        return Some(0.0);
     }
     if x < ASYMPTOTIC_THRESHOLD {
-        return 2.0 * x.sqrt() / LN_2;
+        return Some(2.0 * x.sqrt() / LN_2);
+    }
+    // Guard find_alpha's precondition (it asserts x within [f(hi), f(lo)] and panics otherwise —
+    // its documented private contract). Near x = 1/2 the required α exits ALPHA_BRACKET, so x can
+    // fall outside; return None there instead of tripping the assert.
+    let (lo, hi) = ALPHA_BRACKET;
+    let f = |alpha: f64| {
+        trapezoidal_integral(
+            |s| s / (1.0 + (alpha * s).exp()),
+            0.0,
+            1.0,
+            TRAPEZOIDAL_STEPS,
+        )
+    };
+    if !(f(lo) >= x && f(hi) <= x) {
+        return None;
     }
     let alpha = find_alpha(x);
     let integral = trapezoidal_integral(
@@ -281,7 +298,7 @@ fn kappa_c_at(x: f64) -> f64 {
         1.0,
         TRAPEZOIDAL_STEPS,
     );
-    (integral + alpha * x) / LN_2
+    Some((integral + alpha * x) / LN_2)
 }
 
 /// Inverts ∫₀¹ s/(1+e^(α·s)) ds = x; integrand monotone in α.
@@ -470,7 +487,7 @@ mod tests {
 
     #[test]
     fn kappa_c_midpoint() {
-        let kc = kappa_c_at(0.25);
+        let kc = kappa_c_at(0.25).expect("x=0.25 is well within the solver domain");
         assert!(
             kc > 0.0 && kc.is_finite(),
             "κ_c(0.25) = {kc} should be positive finite"
@@ -479,8 +496,8 @@ mod tests {
 
     #[test]
     fn kappa_c_symmetry() {
-        let kc1 = kappa_c_at(0.2);
-        let kc2 = kappa_c_at(0.8);
+        let kc1 = kappa_c_at(0.2).expect("in domain");
+        let kc2 = kappa_c_at(0.8).expect("in domain (symmetric to 0.2)");
         assert!(
             (kc1 - kc2).abs() < 1e-4,
             "κ_c should be symmetric: κ_c(0.2)={kc1}, κ_c(0.8)={kc2}"
@@ -490,9 +507,9 @@ mod tests {
     /// Peaks at x=1/4 (α=0, `κ_c=1`), NOT at x=1/2 (paper Fig. 2 double-hump).
     #[test]
     fn kappa_c_peak_at_quartile() {
-        let kc_quarter = kappa_c_at(0.25);
-        let kc_edge = kappa_c_at(0.05);
-        let kc_near_half = kappa_c_at(0.45);
+        let kc_quarter = kappa_c_at(0.25).expect("in domain");
+        let kc_edge = kappa_c_at(0.05).expect("in domain");
+        let kc_near_half = kappa_c_at(0.45).expect("in domain");
         assert!(
             (kc_quarter - 1.0).abs() < 1e-3,
             "κ_c(1/4) should be ≈ 1 (α = 0), got {kc_quarter}",
@@ -510,7 +527,7 @@ mod tests {
     /// Paper Fig. 2 / eq (4.3): `κ_c(1/2)` = 0 (saddle α → -∞, integrand cancels).
     #[test]
     fn kappa_c_at_half_is_zero() {
-        assert_eq!(kappa_c_at(0.5), 0.0);
+        assert_eq!(kappa_c_at(0.5), Some(0.0));
 
         let a = [10u64; 8];
         let e_mid: u64 = a.iter().sum::<u64>() / 2;
@@ -523,9 +540,33 @@ mod tests {
         );
     }
 
+    /// Coherence of the panic guard with the paper: energy near ΣA/2 puts x near 1/2, where eq (4.2)'s
+    /// α → -∞ leaves the finite solver bracket and eq (4.3) gives κ_c → 0. Since Dense means κ < κ_c
+    /// and κ > 0 always, this region is NEVER Dense (Sparse/"hard" per §4). So Bracket must not
+    /// classify it Dense (it degrades to None where κ_c is uncomputable, or Sparse), and the
+    /// saddle-point is correctly N/A — no Dense case is lost by returning None instead of panicking.
+    #[test]
+    fn near_half_energy_is_not_dense_so_sasamoto_is_na() {
+        let base: u64 = 21_000_000 * 100_000_000 / 400;
+        let inputs: Vec<u64> = (0..100u64).map(|i| base + i).collect();
+        let sum_a: u128 = inputs.iter().map(|&x| u128::from(x)).sum();
+        let e = (sum_a / 2) as u64;
+
+        let regime = Bracket::new(inputs.iter().copied(), e).map(|b| b.regime());
+        assert!(
+            !matches!(regime, Some(Regime::Dense)),
+            "energy near ΣA/2 must not be Dense (κ_c → 0); got {regime:?}"
+        );
+        assert_eq!(
+            crate::count::companion::sasamoto_approx(&inputs, e),
+            None,
+            "saddle-point is N/A in the near-1/2 Sparse region — returns None, never panics"
+        );
+    }
+
     #[test]
     fn kappa_c_e_matches_x() {
-        assert!((kappa_c(100, 10, 50).unwrap() - kappa_c_at(0.2)).abs() < 1e-12);
+        assert!((kappa_c(100, 10, 50).unwrap() - kappa_c_at(0.2).unwrap()).abs() < 1e-12);
     }
 
     #[test]
@@ -585,13 +626,16 @@ mod tests {
         /// κ_c(x) = κ_c(1−x) (paper Fig. 2: symmetric about 1/2).
         #[test]
         fn kappa_c_symmetric_about_half(x in 1e-3f64..0.499) {
-            let kc1 = kappa_c_at(x);
-            let kc2 = kappa_c_at(1.0 - x);
-            prop_assert!(
-                (kc1 - kc2).abs() < 1e-4,
-                "κ_c({}) = {}, κ_c({}) = {}",
-                x, kc1, 1.0 - x, kc2
-            );
+            // kappa_c_at folds x -> 1-x internally, so both calls share an internal x: equal, or
+            // both None near 1/2 (outside the solver domain). Never asymmetric.
+            match (kappa_c_at(x), kappa_c_at(1.0 - x)) {
+                (Some(kc1), Some(kc2)) => prop_assert!(
+                    (kc1 - kc2).abs() < 1e-4,
+                    "κ_c({}) = {}, κ_c({}) = {}", x, kc1, 1.0 - x, kc2
+                ),
+                (None, None) => {}
+                (a, b) => prop_assert!(false, "asymmetric domain: {a:?} vs {b:?}"),
+            }
         }
 
         /// max(A) ≤ Σ A ≤ (Σ A)²; κ monotone in log L.
@@ -743,11 +787,14 @@ mod tests {
     fn kappa_c_at_finite_across_range() {
         for i in 1..=999 {
             let x = f64::from(i) / 1000.0;
-            let kc = kappa_c_at(x);
-            assert!(
-                kc.is_finite() && kc >= 0.0,
-                "κ_c({x}) = {kc} should be finite and ≥ 0"
-            );
+            // Near x = 1/2 the saddle-point leaves the solver bracket -> None (honest, not a panic);
+            // where computable, κ_c must be finite and non-negative.
+            if let Some(kc) = kappa_c_at(x) {
+                assert!(
+                    kc.is_finite() && kc >= 0.0,
+                    "κ_c({x}) = {kc} should be finite and ≥ 0"
+                );
+            }
         }
     }
 

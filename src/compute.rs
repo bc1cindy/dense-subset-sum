@@ -308,6 +308,17 @@ mod tests {
     }
 
     #[test]
+    fn w_sasamoto_near_half_energy_is_unknown_not_panic() {
+        // Regression: energy near ΣA/2 pushes the saddle-point α outside the finite solver bracket.
+        // This used to panic in find_alpha via kappa_c_at; w_sasamoto must degrade to Unknown.
+        let base: u64 = 21_000_000 * 100_000_000 / 400;
+        let inputs: Vec<u64> = (0..100u64).map(|i| base + i).collect();
+        let sum_a: u128 = inputs.iter().map(|&x| u128::from(x)).sum();
+        let outputs = vec![(sum_a / 2) as u64];
+        assert_eq!(w_sasamoto(&inputs, &outputs), Ambiguity::Unknown);
+    }
+
+    #[test]
     fn radix_mappings_empty_or_zero_is_zero() {
         assert_eq!(radix_mappings(&[], 6), Ambiguity::Exact(0));
         assert_eq!(radix_mappings(&[1000], 0), Ambiguity::Exact(0));
