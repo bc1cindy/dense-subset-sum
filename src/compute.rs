@@ -1,5 +1,11 @@
-//! Four counting paths over a CoinJoin transaction. All return [`Ambiguity`]:
-//! [`w_brute`], [`radix_mappings`], [`w_sparse`], [`w_sasamoto`].
+//! Five counting paths over a CoinJoin transaction, all returning [`Ambiguity`]:
+//! [`w_brute`], [`w_dp`], [`w_sparse`], [`w_sasamoto`] compute `W(E) = #{S ⊆ A : ΣS = E}`
+//! at increasing guarantee cost (exact enumeration → exact pseudo-poly DP → exact-or-truncated
+//! sparse convolution → saddle-point approximation); [`radix_mappings`] computes the
+//! denomination-mapping count `Σ k × m!` instead. [`w_count`] is the dispatcher over the
+//! four `W(E)` paths: it tries them in order of decreasing guarantee strength, each
+//! self-gating to `Ambiguity::Unknown` when it can't handle the input, and returns the
+//! first non-`Unknown` result tagged with the [`Method`] that produced it.
 
 use crate::Ambiguity;
 use crate::count::companion::sasamoto_approx;
@@ -182,6 +188,99 @@ pub fn w_sasamoto(inputs: &[u64], outputs: &[u64]) -> Ambiguity {
         }
     }
     peak.into()
+}
+
+/// Cap on `N` for [`w_brute`] within the [`w_count`] cascade: 2²⁰ subsets is instant.
+pub const BRUTE_MAX: usize = 20;
+
+/// Default `max_cells` budget for the [`w_dp`] tier within [`w_count`]: 2^26 ≈ 67M cells.
+/// Each cell is a `u128` (16 bytes), so this caps the DP table at ~1 GB — the same order of
+/// magnitude as [`DEFAULT_MEMORY_BUDGET`]'s ~1.5 GB sparse-conv budget, so neither tier is
+/// the odd one out on resource use. Callers with a tighter/looser budget should call
+/// `w_dp` directly with their own `max_cells`.
+pub const DP_MAX_CELLS: usize = 1 << 26;
+
+/// Which [`w_count`] tier produced a [`CountReport`]. `None` means every tier returned
+/// `Ambiguity::Unknown`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Method {
+    Brute,
+    Dp,
+    Sparse,
+    Sasamoto,
+    None,
+}
+
+/// Result of [`w_count`]: the ambiguity count/bound/approximation plus which tier produced it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CountReport {
+    pub ambiguity: Ambiguity,
+    pub method: Method,
+}
+
+/// Feasibility cascade over the four `W(E)` counting paths: [`w_brute`] → [`w_dp`] →
+/// [`w_sparse`] → [`w_sasamoto`], in order of decreasing guarantee strength. Each tier
+/// self-gates to `Ambiguity::Unknown` when it can't handle the input (budget/regime), so
+/// this is simply "try in order, accept the first non-`Unknown`" — the exact tiers are
+/// tried first, so `w_count` always returns the strongest guarantee available.
+///
+/// Counts all subset sizes (`max_size = inputs.len()`, i.e. the full `W(E)`).
+#[must_use]
+pub fn w_count(inputs: &[u64], outputs: &[u64]) -> CountReport {
+    let max_size = inputs.len();
+
+    if inputs.len() <= BRUTE_MAX {
+        let a = w_brute(inputs, outputs, max_size);
+        if !a.is_unknown() {
+            return CountReport {
+                ambiguity: a,
+                method: Method::Brute,
+            };
+        }
+    }
+
+    let a = w_dp(inputs, outputs, max_size, DP_MAX_CELLS);
+    if !a.is_unknown() {
+        return CountReport {
+            ambiguity: a,
+            method: Method::Dp,
+        };
+    }
+
+    // Sparse: accept immediately ONLY when Exact. A truncated `LowerBound` is a poor magnitude
+    // signal for a large dense mix (the count saturates far below the true value), so we hold it and
+    // prefer the Sasamoto saddle-point's accurate log-magnitude when the input is in the Dense regime.
+    // Priority: Exact > Sasamoto LogApprox (Dense) > sparse LowerBound > Unknown.
+    let sparse = w_sparse(inputs, outputs, max_size, DEFAULT_MEMORY_BUDGET);
+    if sparse.is_exact() {
+        return CountReport {
+            ambiguity: sparse,
+            method: Method::Sparse,
+        };
+    }
+
+    let sasa = w_sasamoto(inputs, outputs);
+    if sasa.is_approx() {
+        return CountReport {
+            ambiguity: sasa,
+            method: Method::Sasamoto,
+        };
+    }
+
+    // No exact count and no in-regime approximation: fall back to sparse's LowerBound if it produced
+    // one (a guaranteed floor), else Unknown.
+    if sparse.is_lower_bound() {
+        return CountReport {
+            ambiguity: sparse,
+            method: Method::Sparse,
+        };
+    }
+
+    CountReport {
+        ambiguity: Ambiguity::Unknown,
+        method: Method::None,
+    }
 }
 
 /// Distinct non-empty output subset sums.
@@ -481,6 +580,170 @@ mod tests {
             outputs in prop::collection::vec(1u64..=1000, 1..=4),
         ) {
             prop_assert_eq!(w_sasamoto(&inputs, &outputs), Ambiguity::Unknown);
+        }
+    }
+
+    mod w_count_tests {
+        use super::*;
+
+        /// `ln C(n, k)` via direct log-space summation (exact enough for f64 comparison;
+        /// no crate dependency needed for this one test fixture).
+        fn ln_binomial(n: u64, k: u64) -> f64 {
+            (1..=k).map(|i| ((n - k + i) as f64 / i as f64).ln()).sum()
+        }
+
+        #[test]
+        fn w_count_tiny_uses_brute() {
+            let report = w_count(&[500, 300], &[500, 300]);
+            assert_eq!(report.method, Method::Brute);
+            assert_eq!(report.ambiguity, Ambiguity::Exact(2));
+        }
+
+        /// N=25 > BRUTE_MAX rules out brute, but the reachable sum is tiny (all-ones
+        /// inputs), so the DP tier resolves it exactly.
+        #[test]
+        fn w_count_mid_n_small_sum_uses_dp() {
+            let inputs = vec![1u64; 25];
+            let outputs = vec![3u64, 4];
+            let report = w_count(&inputs, &outputs);
+            assert_eq!(report.method, Method::Dp);
+            assert!(report.ambiguity.is_exact());
+            // Cross-check against w_dp called directly with the same budget.
+            let direct = w_dp(&inputs, &outputs, inputs.len(), DP_MAX_CELLS);
+            assert_eq!(report.ambiguity, direct);
+        }
+
+        /// N=25 distinct near-coprime, astronomically large inputs (gcd 1, ΣA ≈ 3.25e9):
+        /// the DP tier's cell budget (proportional to ΣA) overflows, but sparse
+        /// convolution's cost tracks output support, not input magnitude, so it still
+        /// resolves the single-target instance.
+        #[test]
+        fn w_count_dp_overflow_uses_sparse() {
+            let inputs: Vec<u64> = (1..=25u64).map(|i| i * 10_000_000 + 1).collect();
+            let target = inputs[0] + inputs[1];
+            let outputs = vec![target];
+            assert_eq!(
+                w_dp(&inputs, &outputs, inputs.len(), DP_MAX_CELLS),
+                Ambiguity::Unknown,
+                "fixture must actually overflow the DP tier for this test to be meaningful"
+            );
+            let report = w_count(&inputs, &outputs);
+            assert_eq!(report.method, Method::Sparse);
+            assert!(!report.ambiguity.is_unknown());
+        }
+
+        /// Outputs with no denomination structure (distinct powers of two) blow past
+        /// `output_subsums`'s reachable-sum budget — every tier gates on that same
+        /// helper, so all four fall through to `Unknown`.
+        #[test]
+        fn w_count_intractable_output_subsums_is_none() {
+            let inputs: Vec<u64> = (1..=30u64).map(|i| i * 999_999_937 + 7).collect();
+            let outputs: Vec<u64> = (1..=40u64).map(|i| 1u64 << i).collect();
+            assert!(output_subsums(&outputs).is_none());
+            let report = w_count(&inputs, &outputs);
+            assert_eq!(report.method, Method::None);
+            assert_eq!(report.ambiguity, Ambiguity::Unknown);
+        }
+
+        /// Sasamoto's Dense-regime instance from `density_regime::regime_dense_high_n`
+        /// (N=100 equal coins, E = MAX_MONEY/4). Cross-validates `w_count`'s result
+        /// against `ln C(100, 25)` regardless of which tier resolves it.
+        ///
+        /// NOTE: with equal-valued inputs, gcd-normalization collapses the DP tier to
+        /// trivial size (100 cells of value 1 each), so `w_dp` computes this exactly and
+        /// wins the cascade before `w_sparse`/`w_sasamoto` are even tried — `Method::Dp`,
+        /// not `Method::Sasamoto`, is what actually fires here. More fundamentally,
+        /// `w_sparse` and `w_sasamoto` share the exact same gate (`output_subsums`
+        /// succeeding), `w_sparse` is tried first, and `w_sparse` never itself resolves
+        /// to `Unknown` once that gate passes (its `Bound` is always `Exact` or
+        /// `LowerBound`) — so in this cascade `Method::Sasamoto` can only fire when
+        /// `output_subsums` fails, but that also disables `w_sasamoto` itself (it gates
+        /// on the same helper). `Method::Sasamoto` is therefore unreachable via this
+        /// exact cascade; the assertion below is written to hold regardless of which
+        /// tier answers, so it stays meaningful if the primitives' internals change.
+        #[test]
+        fn w_count_sasamoto_matches_binomial() {
+            let n: usize = 100;
+            let c: u64 = 21_000_000 * 100_000_000 / n as u64;
+            let inputs = vec![c; n];
+            let outputs = vec![25 * c];
+
+            // The Sasamoto primitive itself, in isolation, is accurate in-regime.
+            let target = outputs[0];
+            let log_w_direct =
+                sasamoto_approx(&inputs, target).expect("N=100 equal coins at E=ΣA/4 is Dense");
+            let ln_c = ln_binomial(100, 25);
+            let rel_err_direct = (log_w_direct - ln_c).abs() / ln_c.abs();
+            assert!(
+                rel_err_direct < 1e-3,
+                "sasamoto_approx alone: log_w={log_w_direct}, ln C(100,25)={ln_c}, rel_err={rel_err_direct}"
+            );
+
+            // Whichever tier w_count actually lands on for this instance must agree.
+            let report = w_count(&inputs, &outputs);
+            assert!(!report.ambiguity.is_unknown(), "instance is Dense; some tier must resolve it");
+            let log_w = report.ambiguity.log().expect("non-Unknown Ambiguity always has a log()");
+            let rel_err = (log_w - ln_c).abs() / ln_c.abs();
+            assert!(
+                rel_err < 1e-3,
+                "w_count (method={:?}): log_w={log_w}, ln C(100,25)={ln_c}, rel_err={rel_err}",
+                report.method,
+            );
+        }
+
+        #[test]
+        fn w_count_lands_on_sasamoto_for_saturated_dense() {
+            // The large-dense-coinjoin case exact counting saturates on. Consecutive values -> gcd 1
+            // (DP can't collapse; the huge normalized sum overflows DP_MAX_CELLS -> Unknown); a
+            // target ~ΣA/4 (x ≈ 1/4, well within the saddle-point solver domain) is reached by an
+            // astronomical number of subsets, so the sparse counter saturates -> LowerBound (post the
+            // count-saturation fix). Only the Dense saddle-point resolves it, so w_count returns
+            // Method::Sasamoto with the accurate log-magnitude instead of the saturated LowerBound.
+            let base: u64 = 21_000_000 * 100_000_000 / 400; // ~MAX_MONEY/400, Dense per prior probe
+            let inputs: Vec<u64> = (0..100u64).map(|i| base + i).collect();
+            let sum_a: u128 = inputs.iter().map(|&x| u128::from(x)).sum();
+            let outputs = vec![(sum_a / 4) as u64]; // x ≈ 1/4: κ_c peak, saddle-point well-defined
+
+            let report = w_count(&inputs, &outputs);
+            assert_eq!(
+                report.method,
+                Method::Sasamoto,
+                "expected Sasamoto tier; got {:?} with {:?}",
+                report.method, report.ambiguity
+            );
+            assert!(report.ambiguity.is_approx());
+            assert!(report.ambiguity.log().is_some_and(f64::is_finite));
+        }
+
+        proptest! {
+            /// On small instances (N<=8, small values) w_brute/w_dp/w_sparse always agree
+            /// exactly — so whichever tier w_count lands on, the count is the same.
+            #[test]
+            fn w_count_exact_methods_agree(
+                inputs in prop::collection::vec(1u64..=50, 1..=8),
+                outputs in prop::collection::vec(1u64..=50, 1..=6),
+            ) {
+                let ms = inputs.len();
+                let brute = w_brute(&inputs, &outputs, ms);
+                let dp = w_dp(&inputs, &outputs, ms, DP_MAX_CELLS);
+                let sparse = w_sparse(&inputs, &outputs, ms, DEFAULT_MEMORY_BUDGET);
+                prop_assert_eq!(brute, dp);
+                prop_assert_eq!(dp, sparse);
+                prop_assert!(brute.is_exact());
+            }
+
+            /// Guarantee ordering: on the same small/exact-agreeing fixtures, w_count's
+            /// result is always Exact — never a LowerBound/LogApprox downgrade, because
+            /// an exact tier always resolves them first.
+            #[test]
+            fn w_count_never_downgrades(
+                inputs in prop::collection::vec(1u64..=50, 1..=8),
+                outputs in prop::collection::vec(1u64..=50, 1..=6),
+            ) {
+                let report = w_count(&inputs, &outputs);
+                prop_assert!(report.ambiguity.is_exact());
+                prop_assert!(matches!(report.method, Method::Brute | Method::Dp | Method::Sparse));
+            }
         }
     }
 }

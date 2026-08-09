@@ -11,7 +11,8 @@ mod transaction;
 
 pub use ambiguity::Ambiguity;
 pub use compute::{
-    DEFAULT_MEMORY_BUDGET, KNEE, radix_mappings, w_brute, w_dp, w_sasamoto, w_sparse,
+    BRUTE_MAX, CountReport, DEFAULT_MEMORY_BUDGET, DP_MAX_CELLS, KNEE, Method, radix_mappings,
+    w_brute, w_count, w_dp, w_sasamoto, w_sparse,
 };
 pub use loss::LossError;
 pub use transaction::Transaction;
