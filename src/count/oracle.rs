@@ -1,4 +1,4 @@
-//! Exact oracles: brute-force enumeration and 0/1 DP. Ground truth for sparse/Sasamoto.
+//! Exact oracles: brute-force enumeration and 0/1 DP. References for sparse/Sasamoto.
 //!
 //! ```
 //! use dense_subset_sum::{brute_force_w, dp_w};

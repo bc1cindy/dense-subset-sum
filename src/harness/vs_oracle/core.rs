@@ -1,4 +1,4 @@
-//! Base types and exhaustive / DP-ground-truth comparison helpers.
+//! Base types and exhaustive / exact-DP comparison helpers.
 
 use std::collections::HashMap;
 
@@ -11,7 +11,7 @@ use crate::count::sumset::{Count, GradedSumset};
 use crate::harness::stats::{median, spearman_correlation};
 use crate::{dp_w, kappa, log_w_for_e_sat};
 
-/// Ground truth for `w_exact`: exhaustive enumeration or Monte Carlo estimate.
+/// Reference for `w_exact`: exhaustive enumeration or Monte Carlo estimate.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CompareMode {
     /// Full 2^N enumeration; `w_exact` is the integer count.
@@ -93,7 +93,7 @@ pub fn compare(
     )
 }
 
-/// Which estimators are ground truth vs. asymptotic diagnostic for a given (N, W range).
+/// Which estimators are exact references vs. asymptotic diagnostics for a given (N, W range).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompareRegime {
     /// N ≤ 20, small W — Lookup/DP exact; Sasamoto out of regime.
@@ -118,7 +118,7 @@ pub fn classify_regime(report: &ComparisonReport) -> CompareRegime {
     }
 }
 
-/// DP as ground truth, no brute force.
+/// DP as the exact reference, without brute force.
 ///
 /// Returns `Err` on invalid input (empty / all-zero) or when `Σa/gcd`
 /// exceeds `dp_max` (caller should raise `--dp-max` or lower L/N).
@@ -211,7 +211,7 @@ pub fn compare_dp_ground_truth(
         &rows.iter().filter_map(|r| r.err_lookup).collect::<Vec<_>>(),
     );
     let dp = make_summary(
-        "dp (ground truth)",
+        "dp (exact reference)",
         &dp_points,
         &rows.iter().filter_map(|r| r.err_dp).collect::<Vec<_>>(),
     );

@@ -1,4 +1,4 @@
-//! Monte Carlo ground truth for `W(E)` when N > 25 (2^N enumeration infeasible).
+//! Monte Carlo reference estimates for `W(E)` when N > 25 (2^N enumeration infeasible).
 
 use std::collections::HashMap;
 use std::time::Instant;

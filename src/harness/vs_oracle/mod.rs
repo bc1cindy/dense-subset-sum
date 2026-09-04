@@ -1,4 +1,4 @@
-//! W estimators vs ground truth. Exhaustive enumeration for small N,
+//! W estimators vs reference methods. Exhaustive enumeration for small N,
 //! Monte Carlo sampling (with timeout) for larger N.
 
 mod core;

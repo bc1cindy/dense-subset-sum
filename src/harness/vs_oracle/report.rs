@@ -14,7 +14,7 @@ pub fn print_report(report: &ComparisonReport) {
     match report.mode {
         CompareMode::Exhaustive => {
             println!(
-                "Ground truth: exhaustive enumeration over 2^{} subsets",
+                "Exact reference: exhaustive enumeration over 2^{} subsets",
                 report.n
             );
         }
@@ -25,7 +25,7 @@ pub fn print_report(report: &ComparisonReport) {
         } => {
             let status = if timed_out { "timed out" } else { "completed" };
             println!(
-                "Ground truth: Monte Carlo — {}/{} samples ({}); W values are estimates",
+                "Reference estimate: Monte Carlo — {}/{} samples ({}); W values are estimates",
                 samples_drawn, samples_requested, status
             );
         }
@@ -47,7 +47,7 @@ pub fn print_report(report: &ComparisonReport) {
         max_w,
         median_w,
         match regime {
-            CompareRegime::Exact => "EXACT (N≤20, small W) — Lookup/DP are ground truth",
+            CompareRegime::Exact => "EXACT (N≤20, small W) — Lookup/DP are exact references",
             CompareRegime::Asymptotic =>
                 "ASYMPTOTIC (N≥50 or W≥100) — Sasamoto in regime, usable for correlation",
             CompareRegime::Intermediate => "INTERMEDIATE — all estimators informative",
@@ -108,14 +108,14 @@ pub fn print_report(report: &ComparisonReport) {
     println!();
     match regime {
         CompareRegime::Exact => {
-            println!("  [GROUND TRUTH]");
+            println!("  [REFERENCE]");
             print_summary_line(&report.lookup);
             print_summary_line(&report.dp);
             println!("  [ASYMPTOTIC DIAGNOSTIC — out of regime at this N, expect deviation]");
             print_summary_line(&report.sasamoto);
         }
         CompareRegime::Asymptotic => {
-            println!("  [ASYMPTOTIC REGIME — all three are ground-truth candidates]");
+            println!("  [ASYMPTOTIC REGIME — all three are comparison candidates]");
             print_summary_line(&report.sasamoto);
             print_summary_line(&report.lookup);
             print_summary_line(&report.dp);

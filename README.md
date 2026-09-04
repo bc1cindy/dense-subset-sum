@@ -2,17 +2,17 @@
 
 > **Work in progress.**
 
-A tool to measure the **ambiguity of a CoinJoin's amount channel** — a *lower bound* on how many input→output mappings the amounts alone leave open, from an adversary's point of view.
+A tool to measure the **ambiguity of a CoinJoin's amount channel** using conservatively counted subset-sum explanations, from an adversary's point of view.
 
-Given the inputs and outputs of a Bitcoin CoinJoin, it counts (or approximates) how many alternative ways an observer could plausibly match inputs to outputs. The count itself is the output; interpretation of what counts as "enough" is left to the caller.
+Given the inputs and outputs of a Bitcoin CoinJoin, it counts subset-sum solutions that can support alternative explanations of the amounts. The count itself is the output; interpretation of what counts as "enough" is left to the caller.
 
-**Scope of the number.** `W` is an *attacker's ambiguity count*, not a privacy score. It measures one channel (the amounts) of one transaction, under **no auxiliary information**, and is only ever a **lower bound** (we never overestimate). Read it inverted: a **low** `W` is the informative case — it *links* coins (cuts them from the anonymity set); a **high** `W` means the amount channel is *silent*, not that the transaction "is private." So this signal can only ever **destroy** an anonymity claim, never establish one — a transaction's actual privacy is a whole-graph question plus a subjective discount for how much auxiliary information a real adversary holds, neither of which this single-number, single-tx count decides. Downstream it is consumed as a **linkage / cut** signal and, in the dense regime, as **link probabilities**.
+**Scope of the number.** `W` is an *attacker's ambiguity count*, not a privacy score. It measures one channel (the amounts) of one transaction, under **no auxiliary information**. Exact methods report exact counts; truncated sparse methods report explicit lower bounds; the Sasamoto path reports an asymptotic estimate with no one-sided guarantee. A **low exact count** is informative linkage evidence. A low lower bound is inconclusive because the true count may be much higher; a high lower bound proves only that many amount explanations exist under the selected model. An approximation is diagnostic and cannot certify either conclusion. None of these results establishes transaction privacy, which remains a whole-graph question conditioned on the adversary's auxiliary information. Downstream consumers must preserve the result kind; mapping probabilities come from the separate diagnostic mapping API described below.
 
 ## Why this exists
 
 A CoinJoin publishes a list of inputs and a list of outputs. An outside observer cannot see who sent what to whom, but they can **enumerate every plausible input→output mapping** the numbers allow. If only one mapping balances the books while still partitioning the inputs and outputs non-trivially, that is strong evidence of them being linked. If thousands do, an adversary will need additional information in order to partition different users inputs and outputs correctly.
 
-The core question is: *how many alternative mappings are there?* Counting them directly is exponential, so this tool uses `W(E)` — the number of input subsets summing to a given amount `E` — as the **ambiguity primitive**. Many subsets reaching a sub-sum means many possible decompositions, so the amount channel is *ambiguous* there; a single subset means the amounts *pin the mapping down* — the linkage the attacker wants.
+The production-oriented question is: *how much subset-sum cover do the other participants' amounts provide?* The primitive `W(E)` counts input subsets summing to a target `E`. It is related to, but is not the same mathematical object as, a count of complete sub-transaction mappings.
 
 Computing `W(E)` exactly is also exponential in the worst case, so the tool exposes **four counting primitives**, picked by the caller:
 
@@ -20,6 +20,24 @@ Computing `W(E)` exactly is also exponential in the worst case, so the tool expo
 2. **Radix** — independent of N, exploits output structure; counts `Σ k × m!` mappings.
 3. **Sparse convolution** — medium N (scales until the sumset table blows up).
 4. **Asymptotic approximation** (Sasamoto / Toyoizumi / Nishimori) — large N (asymptotic, not valid for small W).
+
+## Diagnostic mapping API
+
+The optional Python extension exposes `mapping_analysis(inputs, outputs, budget_ms=None)` and
+`pairwise_link_prob(...)` for differential research against exact sub-transaction oracles. This API
+reports the mapping family selected by the bundled CJA-based implementation, its entropy, and links
+on which that restricted family agrees. It is diagnostic evidence, not `W(E)`, not CoinScore, and
+not a certificate of transaction or whole-graph privacy.
+When the repeated-denomination fast path skips enumeration, `mapping_analysis` reports
+`dense_fast_path` and `pairwise_link_prob` returns `None`; no probability matrix is inferred.
+
+Programs that write publishable results must call `dss.require_build_revision()`. Such builds must
+set `DSS_GIT_REV` to the immutable 40-character Git revision used to compile the extension. Local
+interactive builds may leave it unset; `dss.__rev__` will then be `None` and the publication gate
+will fail explicitly.
+
+Dependency maintenance and the current `nom` migration blocker are recorded in
+[`docs/dependency-maintenance.md`](docs/dependency-maintenance.md).
 
 ## Glossary — the numbers you'll see
 
