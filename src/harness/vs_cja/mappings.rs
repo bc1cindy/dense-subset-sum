@@ -1,4 +1,4 @@
-//! Ground-truth mapping enumeration via CJA (Maurer et al.).
+//! Exact mapping enumeration built on CJA partition iterators (Maurer et al.).
 
 use coinjoin_analyzer::{
     Partition, PartitionsSubsetSumsFilter, SubsetSumsFilter, SumFilteredPartitionIterator,
@@ -7,6 +7,8 @@ use coinjoin_analyzer::{
 use std::time::Instant;
 
 use crate::Transaction;
+
+type AlignedPartitions = (Partition, Partition);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mapping {
@@ -86,11 +88,13 @@ pub fn enumerate_mappings_within(
         }
         for out_partition in &out_partitions {
             if partitions_match(in_partition, out_partition) {
-                let (aligned_in, aligned_out) = align_partitions(in_partition, out_partition);
-                mappings.push(Mapping {
-                    input_sets: aligned_in,
-                    output_sets: aligned_out,
-                });
+                let alignments = align_partitions_within(in_partition, out_partition, deadline)?;
+                for (input_sets, output_sets) in alignments {
+                    mappings.push(Mapping {
+                        input_sets,
+                        output_sets,
+                    });
+                }
             }
         }
     }
@@ -189,18 +193,17 @@ pub fn pairwise_input_output_prob(non_derived: &[Mapping], tx: &Transaction) -> 
     matrix
 }
 
-/// Structural dense-coinjoin recognizer (the transcript's Radix case): a large instance whose
-/// outputs are dominated by repeated denominations (>=3 of a value) is dense by construction, so
-/// its link matrix is uniform (max ambiguity). O(n) — avoids the slow per-output saddle-point of
-/// the density regime, which does NOT classify real coinjoins Dense and hangs on wide ones.
+/// Recognizes a large repeated-denomination transaction for which exact mapping enumeration is
+/// deliberately skipped. This is only a tractability classification: it does not derive pairwise
+/// probabilities or certify ambiguity.
 #[must_use]
-pub fn dense_uniform_matrix(
+pub(crate) fn is_repeated_denomination_dense_case(
     inputs: &[u64],
     real_outputs: &[u64],
     min_coins: usize,
-) -> Option<Vec<Vec<f64>>> {
+) -> bool {
     if inputs.len() + real_outputs.len() <= min_coins {
-        return None;
+        return false;
     }
     use std::collections::HashMap;
     let mut mult: HashMap<u64, usize> = HashMap::new();
@@ -210,10 +213,7 @@ pub fn dense_uniform_matrix(
     let repeated_denoms = mult.values().filter(|&&c| c >= 3).count();
     let covered: usize = mult.values().filter(|&&c| c >= 3).sum();
     // >=2 distinct denominations each repeated >=3x, covering >=half the outputs => coinjoin-dense.
-    if repeated_denoms >= 2 && covered * 2 >= real_outputs.len() {
-        return Some(vec![vec![1.0f64; real_outputs.len()]; inputs.len()]);
-    }
-    None
+    repeated_denoms >= 2 && covered * 2 >= real_outputs.len()
 }
 
 /// Pairs `(input_idx, output_idx)` linked in **every** non-derived mapping
@@ -261,24 +261,60 @@ fn partitions_match(a: &Partition, b: &Partition) -> bool {
     true
 }
 
-fn align_partitions(inputs: &Partition, outputs: &Partition) -> (Vec<Vec<u64>>, Vec<Vec<u64>>) {
-    let mut out_remaining: Vec<(u64, Vec<u64>)> = outputs
-        .iter()
-        .map(|s| (s.iter().sum(), s.clone()))
-        .collect();
-
-    let mut aligned_in = Vec::new();
-    let mut aligned_out = Vec::new();
-
-    for in_set in inputs {
-        let in_sum: u64 = in_set.iter().sum();
-        if let Some(pos) = out_remaining.iter().position(|(s, _)| *s == in_sum) {
-            aligned_in.push(in_set.clone());
-            aligned_out.push(out_remaining.swap_remove(pos).1);
+fn align_partitions_within(
+    inputs: &Partition,
+    outputs: &Partition,
+    deadline: Option<Instant>,
+) -> Option<Vec<AlignedPartitions>> {
+    fn visit(
+        inputs: &Partition,
+        outputs: &Partition,
+        input_index: usize,
+        used_outputs: &mut [bool],
+        aligned_outputs: &mut Vec<Vec<u64>>,
+        alignments: &mut Vec<AlignedPartitions>,
+        deadline: Option<Instant>,
+    ) -> Option<()> {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return None;
         }
+        if input_index == inputs.len() {
+            alignments.push((inputs.clone(), aligned_outputs.clone()));
+            return Some(());
+        }
+
+        let input_sum: u64 = inputs[input_index].iter().sum();
+        for (output_index, output_set) in outputs.iter().enumerate() {
+            if !used_outputs[output_index] && output_set.iter().sum::<u64>() == input_sum {
+                used_outputs[output_index] = true;
+                aligned_outputs.push(output_set.clone());
+                visit(
+                    inputs,
+                    outputs,
+                    input_index + 1,
+                    used_outputs,
+                    aligned_outputs,
+                    alignments,
+                    deadline,
+                )?;
+                aligned_outputs.pop();
+                used_outputs[output_index] = false;
+            }
+        }
+        Some(())
     }
 
-    (aligned_in, aligned_out)
+    let mut alignments = Vec::new();
+    visit(
+        inputs,
+        outputs,
+        0,
+        &mut vec![false; outputs.len()],
+        &mut Vec::with_capacity(inputs.len()),
+        &mut alignments,
+        deadline,
+    )?;
+    Some(alignments)
 }
 
 fn merge_sub_txs(m: &Mapping, i: usize, j: usize) -> Mapping {
@@ -336,34 +372,25 @@ mod tests {
     use crate::fixtures;
 
     #[test]
-    fn dense_uniform_matrix_fires_on_repeated_denomination_coinjoin() {
-        use super::dense_uniform_matrix;
+    fn repeated_denomination_dense_case_is_only_a_classifier() {
+        use super::is_repeated_denomination_dense_case;
         let inputs: Vec<u64> = (0..12).map(|k| 1_000_000 + k).collect();
-        let mut outputs: Vec<u64> = Vec::new();
-        for _ in 0..8 {
-            outputs.push(20_000);
-        }
-        for _ in 0..8 {
-            outputs.push(2_097_152);
-        }
-        for _ in 0..4 {
-            outputs.push(5_000_000);
-        } // 20 outputs, 3 repeated denoms cover all
-        let m = dense_uniform_matrix(&inputs, &outputs, 15).expect("repeated-denom coinjoin fires");
-        assert_eq!(m.len(), inputs.len());
-        assert_eq!(m[0].len(), outputs.len());
-        assert!(m.iter().flatten().all(|&v| v == 1.0));
+        let mut outputs = vec![20_000; 8];
+        outputs.extend(std::iter::repeat_n(2_097_152, 8));
+        outputs.extend(std::iter::repeat_n(5_000_000, 4));
+        // 20 outputs, 3 repeated denoms cover all
+        assert!(is_repeated_denomination_dense_case(&inputs, &outputs, 15));
         assert!(
-            dense_uniform_matrix(&[500_000, 500_000], &[900_000, 90_000], 15).is_none(),
+            !is_repeated_denomination_dense_case(&[500_000, 500_000], &[900_000, 90_000], 15),
             "payment must not fire"
         );
         let distinct: Vec<u64> = (1..=40).map(|k| k * 111_113).collect();
         assert!(
-            dense_uniform_matrix(&vec![1_000_000u64; 5], &distinct, 15).is_none(),
+            !is_repeated_denomination_dense_case(&[1_000_000u64; 5], &distinct, 15),
             "distinct-large must not fire"
         );
         assert!(
-            dense_uniform_matrix(&[3, 5], &[8], 15).is_none(),
+            !is_repeated_denomination_dense_case(&[3, 5], &[8], 15),
             "small must not fire"
         );
     }

@@ -10,4 +10,4 @@ license = "MIT"
 
 [tool.maturin]
 module-name = "dss"
-features = ["python"]
+features = ["extension-module"]
