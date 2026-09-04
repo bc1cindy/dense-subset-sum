@@ -72,10 +72,10 @@ impl<F: Field> GradedSumset<F> {
     pub fn count_total(&self, e: u64) -> Count {
         let mut sum = 0u32;
         for m in 0..=self.max_degree {
-            if let Some(bucket) = self.degrees.get(m) {
-                if let Some(&v) = bucket.get(&e) {
-                    sum = sum.saturating_add(v);
-                }
+            if let Some(bucket) = self.degrees.get(m)
+                && let Some(&v) = bucket.get(&e)
+            {
+                sum = sum.saturating_add(v);
             }
         }
         let truncated = self.bound_total() == Bound::LowerBound;
@@ -92,10 +92,10 @@ impl<F: Field> GradedSumset<F> {
         }
         let mut sum = 0u32;
         for m in lo..=hi {
-            if let Some(bucket) = self.degrees.get(m) {
-                if let Some(&v) = bucket.get(&e) {
-                    sum = sum.saturating_add(v);
-                }
+            if let Some(bucket) = self.degrees.get(m)
+                && let Some(&v) = bucket.get(&e)
+            {
+                sum = sum.saturating_add(v);
             }
         }
         let truncated = self.bound == Bound::LowerBound;

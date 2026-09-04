@@ -77,8 +77,7 @@ fn log_lookup_w(set: &[u64], target: u64, knee: usize) -> Option<f64> {
     if set.is_empty() || target == 0 {
         return None;
     }
-    let s: GradedSumset<Goldilocks> =
-        GradedSumset::bounded(set, &[target], knee.min(set.len()).max(0));
+    let s: GradedSumset<Goldilocks> = GradedSumset::bounded(set, &[target], knee.min(set.len()));
     let visible = match s.count_total(target) {
         Count::Confirmed(n) | Count::Truncated(n) => n,
         Count::Absent | Count::Unknown => return Some(f64::NEG_INFINITY),

@@ -53,12 +53,12 @@ pub fn radix_sumsets_up_to(
         let mut next: HashSet<u64> = HashSet::with_capacity(current.len() * denoms.len());
         for &s in &current {
             for &d in denoms {
-                if let Some(t) = s.checked_add(d) {
-                    if t <= max_combination_value {
-                        next.insert(t);
-                        if t >= 1 {
-                            accumulated.insert(t);
-                        }
+                if let Some(t) = s.checked_add(d)
+                    && t <= max_combination_value
+                {
+                    next.insert(t);
+                    if t >= 1 {
+                        accumulated.insert(t);
                     }
                 }
             }
@@ -102,10 +102,11 @@ pub fn radix_sumset_counts(
         let sum = indices
             .iter()
             .try_fold(0u64, |acc, &i| acc.checked_add(padded[i]));
-        if let Some(s) = sum {
-            if s >= 1 && s <= max_combination_value {
-                *counts.entry(s).or_insert(0) += 1;
-            }
+        if let Some(s) = sum
+            && s >= 1
+            && s <= max_combination_value
+        {
+            *counts.entry(s).or_insert(0) += 1;
         }
         let mut pos = k;
         let advanced = loop {

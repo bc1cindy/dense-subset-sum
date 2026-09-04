@@ -1,6 +1,6 @@
 //! Prime field for NTT. Impls supply P, G, `TWO_ADIC_ORDER`, add/sub/mul.
 
-/// Finite-field arithmetic backing the NTT in [`super::ntt`].
+/// Finite-field arithmetic backing the internal number-theoretic transform.
 ///
 /// # Safety contract for impls
 ///

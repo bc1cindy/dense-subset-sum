@@ -1,4 +1,4 @@
-/// `LowerBound` is absorbing under [`Bound::join`].
+/// `LowerBound` is absorbing when bounds are combined internally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Bound {

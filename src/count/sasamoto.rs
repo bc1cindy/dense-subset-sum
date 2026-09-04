@@ -24,7 +24,7 @@ pub(crate) fn log_w_for_e(a: &[f64], e_target: f64) -> f64 {
     log_w(a, beta)
 }
 
-/// u64/satoshi entry: gcd-normalizes A and E, then dispatches to [`log_w_for_e`].
+/// u64/satoshi entry: gcd-normalizes A and E, then dispatches to the floating-point solver.
 /// Paper (note after eq 3.6) assumes gcd(A) = 1; satoshi inputs rarely satisfy
 /// it. Returns `NEG_INFINITY` when E is not a multiple of gcd(A).
 ///
@@ -55,7 +55,7 @@ pub(crate) fn log_w_for_m_e(a: &[f64], m_target: usize, e_target: f64) -> f64 {
     log_w_grand(a, beta, mu, m, e_target)
 }
 
-/// u64/satoshi companion to [`log_w_for_m_e`]. Same gcd normalization as
+/// u64/satoshi companion to the size-constrained floating-point solver. Same gcd normalization as
 /// [`log_w_for_e_sat`]; see its doc for the paper §3 motivation.
 ///
 /// # Panics
@@ -456,7 +456,7 @@ mod tests {
         }
     }
 
-    /// Brute-force ground truth for W(M, E): for each (m, E) cell with W > 100,
+    /// Brute-force reference for W(M, E): for each (m, E) cell with W > 100,
     /// the asymptotic should match within the same tolerance as the
     /// unconstrained brute-force test.
     #[test]

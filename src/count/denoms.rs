@@ -29,10 +29,10 @@ pub static STANDARD_DENOMS: LazyLock<HashSet<u64>> = LazyLock::new(|| {
     let mut p = 1u64;
     loop {
         s.insert(p);
-        if let Some(double) = p.checked_mul(2) {
-            if double <= MAX_SATS {
-                s.insert(double);
-            }
+        if let Some(double) = p.checked_mul(2)
+            && double <= MAX_SATS
+        {
+            s.insert(double);
         }
         match p.checked_mul(3) {
             Some(next) if next <= MAX_SATS => p = next,
@@ -98,10 +98,11 @@ pub fn multiples_in_range(values: &[u64], coefficients: &[u64], min: u64, max: u
     let mut s: BTreeSet<u64> = BTreeSet::new();
     for &v in values {
         for &c in coefficients {
-            if let Some(cv) = v.checked_mul(c) {
-                if cv >= min && cv <= max {
-                    s.insert(cv);
-                }
+            if let Some(cv) = v.checked_mul(c)
+                && cv >= min
+                && cv <= max
+            {
+                s.insert(cv);
             }
         }
     }

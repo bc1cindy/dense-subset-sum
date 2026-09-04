@@ -93,10 +93,9 @@ pub fn log_w_signed<F: Field>(
     if plus.is_empty() && minus.is_empty() {
         return Err(SignedError::EmptyInput);
     }
-    let p: GradedSumset<F> =
-        GradedSumset::builder(plus, budget, &[]).bounded(knee.min(plus.len()).max(0));
+    let p: GradedSumset<F> = GradedSumset::builder(plus, budget, &[]).bounded(knee.min(plus.len()));
     let n: GradedSumset<F> =
-        GradedSumset::builder(minus, budget, &[]).bounded(knee.min(minus.len()).max(0));
+        GradedSumset::builder(minus, budget, &[]).bounded(knee.min(minus.len()));
     let count = p.count_balance(&n, target);
     if count == 0 {
         Err(SignedError::Unreachable)

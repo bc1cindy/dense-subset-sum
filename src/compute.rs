@@ -181,10 +181,10 @@ pub fn w_sasamoto(inputs: &[u64], outputs: &[u64]) -> Ambiguity {
         if target == 0 || target >= sum_a {
             continue;
         }
-        if let Some(log_w) = sasamoto_approx(inputs, target) {
-            if log_w.is_finite() {
-                peak = Some(peak.map_or(log_w, |p| p.max(log_w)));
-            }
+        if let Some(log_w) = sasamoto_approx(inputs, target)
+            && log_w.is_finite()
+        {
+            peak = Some(peak.map_or(log_w, |p| p.max(log_w)));
         }
     }
     peak.into()
@@ -465,9 +465,8 @@ mod tests {
     fn output_subsums_scales_to_large_dense_set() {
         // 40 denominated outputs — far past the old 2^n / n<=63 enumeration — but few DISTINCT
         // subset sums because the values collide. The DP returns the exact set cheaply.
-        let outputs: Vec<u64> = std::iter::repeat(131_072u64)
-            .take(20)
-            .chain(std::iter::repeat(262_144u64).take(20))
+        let outputs: Vec<u64> = std::iter::repeat_n(131_072u64, 20)
+            .chain(std::iter::repeat_n(262_144u64, 20))
             .collect();
         let sums = output_subsums(&outputs).expect("dense set must be tractable");
         assert!(
@@ -681,8 +680,14 @@ mod tests {
 
             // Whichever tier w_count actually lands on for this instance must agree.
             let report = w_count(&inputs, &outputs);
-            assert!(!report.ambiguity.is_unknown(), "instance is Dense; some tier must resolve it");
-            let log_w = report.ambiguity.log().expect("non-Unknown Ambiguity always has a log()");
+            assert!(
+                !report.ambiguity.is_unknown(),
+                "instance is Dense; some tier must resolve it"
+            );
+            let log_w = report
+                .ambiguity
+                .log()
+                .expect("non-Unknown Ambiguity always has a log()");
             let rel_err = (log_w - ln_c).abs() / ln_c.abs();
             assert!(
                 rel_err < 1e-3,
@@ -709,7 +714,8 @@ mod tests {
                 report.method,
                 Method::Sasamoto,
                 "expected Sasamoto tier; got {:?} with {:?}",
-                report.method, report.ambiguity
+                report.method,
+                report.ambiguity
             );
             assert!(report.ambiguity.is_approx());
             assert!(report.ambiguity.log().is_some_and(f64::is_finite));

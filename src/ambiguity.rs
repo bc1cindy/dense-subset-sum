@@ -99,7 +99,7 @@ impl From<Result<u128, BruteError>> for Ambiguity {
 /// Maps `None` and non-finite inputs (NaN, ±∞) to [`Self::Unknown`]. `NEG_INFINITY` from
 /// an approximation cannot upgrade to "unreachable" because approximations are never
 /// trusted as strict bounds; callers that have exact 0 counts should construct
-/// [`Self::Exact(0)`] directly instead.
+/// [`Self::Exact`] with value zero directly instead.
 impl From<Option<f64>> for Ambiguity {
     fn from(o: Option<f64>) -> Self {
         match o {
