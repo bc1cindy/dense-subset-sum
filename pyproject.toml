@@ -6,6 +6,7 @@ build-backend = "maturin"
 name = "dss"
 version = "0.1.0"
 requires-python = ">=3.9"
+license = "MIT"
 
 [tool.maturin]
 module-name = "dss"
