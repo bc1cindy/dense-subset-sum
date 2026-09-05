@@ -1,6 +1,9 @@
 //! Cross-validation of estimators against brute force and CJA mappings.
 
 pub use density_sweep::{SubsetDensityPoint, print_subset_density_sweep, subset_density_sweep};
+// Only the Python surface classifies tractability; gating the re-export the way the module
+// itself is gated keeps the default build from carrying an item nothing in it can call.
+#[cfg(feature = "python")]
 pub(crate) use mappings::is_repeated_denomination_dense_case;
 pub use mappings::{
     Mapping, boltzmann_entropy, deterministic_links, enumerate_mappings, enumerate_mappings_within,

@@ -2,10 +2,17 @@
 //! [`w_brute`], [`w_dp`], [`w_sparse`], [`w_sasamoto`] compute `W(E) = #{S ⊆ A : ΣS = E}`
 //! at increasing guarantee cost (exact enumeration → exact pseudo-poly DP → exact-or-truncated
 //! sparse convolution → saddle-point approximation); [`radix_mappings`] computes the
-//! denomination-mapping count `Σ k × m!` instead. [`w_count`] is the dispatcher over the
-//! four `W(E)` paths: it tries them in order of decreasing guarantee strength, each
-//! self-gating to `Ambiguity::Unknown` when it can't handle the input, and returns the
-//! first non-`Unknown` result tagged with the [`Method`] that produced it.
+//! denomination-mapping count `Σ k × m!` instead, and is tagged `Diagnostic` because that is a
+//! different object. [`w_count`] is the dispatcher over the four `W(E)` paths: it tries them in
+//! feasibility order, each self-gating to `Ambiguity::Unknown` when it can't handle the input,
+//! and returns the first accepted result tagged with the [`Method`] that produced it. Acceptance
+//! is not guarantee order — see [`w_count`].
+//!
+//! `log_w` is not one quantity across those paths. The exact tiers sum `W(E)` over *every*
+//! distinct output subset sum and take the log of that total; [`w_sasamoto`] takes the largest
+//! per-target `ln W(E)` instead, because a saddle-point estimate is a magnitude and summing
+//! magnitudes across targets compounds the approximation. A sum-over-targets and a
+//! peak-over-targets are comparable in order of magnitude, not entrywise.
 
 use crate::Ambiguity;
 use crate::count::companion::sasamoto_approx;
@@ -40,7 +47,9 @@ pub fn w_brute(inputs: &[u64], outputs: &[u64], max_size: usize) -> Ambiguity {
         return Ambiguity::Unknown;
     };
     let n_in = inputs.len();
-    let full_input_sum: u64 = inputs.iter().sum();
+    let Some(full_input_sum) = checked_total(inputs) else {
+        return Ambiguity::Unknown;
+    };
     let cap = max_size.min(n_in);
     let mut count: u128 = 0;
     for &target in &targets {
@@ -61,34 +70,66 @@ pub fn w_brute(inputs: &[u64], outputs: &[u64], max_size: usize) -> Ambiguity {
     Ambiguity::Exact(count)
 }
 
-/// `Σ_outputs k × m!` where `k` = distinct denoms, `m` = min multiplicity in `outputs`; `max_size`
-/// caps denoms per decomposition. Non-decomposable outputs contribute 0.
+/// The inputs' total, or `None` when it does not fit a `u64`.
+///
+/// Saturating here would clamp to `u64::MAX` and hide exactly the condition the caller has to
+/// detect: an input set this crate cannot count over. Every counting path already answers
+/// "cannot handle this input" with [`Ambiguity::Unknown`], so the overflow answers the same way
+/// rather than inventing a total no transaction has.
+fn checked_total(inputs: &[u64]) -> Option<u64> {
+    inputs.iter().copied().try_fold(0u64, u64::checked_add)
+}
+
+/// `Σ_{distinct output value} k × m!` where `k` = distinct denoms in the value's decomposition and
+/// `m` = the smallest multiplicity those denoms have *in `outputs`*; `max_size` caps denoms per
+/// decomposition.
+///
+/// The summand is a property of a value, not of each coin carrying it: a denomination repeated
+/// `m` times contributes its `m!` permutations once, not `m` times. A decomposition naming a
+/// denomination that is not itself an output contributes nothing — the exchange it stands for
+/// swaps a size-`k` subset of outputs for a size-1 one, and a subset whose members are absent
+/// cannot be swapped. Non-decomposable outputs contribute 0.
+///
+/// Returns [`Ambiguity::Diagnostic`]: this counts denomination exchanges among the outputs, which
+/// is neither `W(E)` nor a bound on the transaction's mapping count — the call never sees the
+/// inputs, and its answer moves under a uniform rescaling that leaves the mapping count fixed. It
+/// is also incomplete by construction: permutations confined to one sub-transaction change no
+/// assignment and should be divided back out, which needs the block structure this signature does
+/// not carry.
 #[must_use]
 pub fn radix_mappings(outputs: &[u64], max_size: usize) -> Ambiguity {
     if outputs.is_empty() || max_size == 0 {
-        return Ambiguity::Exact(0);
+        return Ambiguity::Diagnostic(0);
     }
     let denoms = standard_denoms_in_range(DEFAULT_MIN_DENOM_SATS, DEFAULT_MAX_DENOM_SATS);
     let mut output_mult: HashMap<u64, usize> = HashMap::new();
     for &v in outputs {
         *output_mult.entry(v).or_insert(0) += 1;
     }
+    let mut distinct: Vec<u64> = output_mult.keys().copied().collect();
+    distinct.sort_unstable();
     let mut total: u128 = 0;
-    for &output in outputs {
+    for output in distinct {
         let Some(decomp) = radix_decompose(&denoms, output, max_size) else {
             continue;
         };
-        let k_distinct = decomp.iter().collect::<HashSet<_>>().len();
-        let m_min = decomp
+        let Some(m_min) = decomp
             .iter()
-            .map(|d| output_mult.get(d).copied().unwrap_or(1))
+            .map(|d| output_mult.get(d).copied().unwrap_or(0))
             .min()
-            .unwrap_or(1);
+        else {
+            continue; // empty decomposition: nothing to exchange
+        };
+        if m_min == 0 {
+            continue;
+        }
+        // `radix_decompose` returns an ascending multiset.
+        let k_distinct = 1 + decomp.windows(2).filter(|w| w[0] != w[1]).count();
         if let Some(mappings) = radix_mapping_count(k_distinct, m_min) {
             total = total.saturating_add(mappings);
         }
     }
-    Ambiguity::Exact(total)
+    Ambiguity::Diagnostic(total)
 }
 
 /// Exact `Σ_{E ∈ output_subsums} Σ_{m=1..=max_size} W(m, E)` via the pseudo-polynomial DP oracle
@@ -105,7 +146,9 @@ pub fn w_dp(inputs: &[u64], outputs: &[u64], max_size: usize, max_cells: usize) 
         return Ambiguity::Unknown;
     };
     let n_in = inputs.len();
-    let full_input_sum: u64 = inputs.iter().sum();
+    let Some(full_input_sum) = checked_total(inputs) else {
+        return Ambiguity::Unknown;
+    };
     let cap = max_size.min(n_in);
     let mut count: u128 = 0;
     for &target in &targets {
@@ -146,7 +189,9 @@ pub fn w_sparse(
     targets.sort_unstable();
     let n_in = inputs.len();
     let cap = max_size.min(n_in);
-    let full_input_sum: u64 = inputs.iter().sum();
+    let Some(full_input_sum) = checked_total(inputs) else {
+        return Ambiguity::Unknown;
+    };
     let budget = GradedSumsetBudget::<Goldilocks>::default().with_max_size(memory_budget);
     let sumset: GradedSumset =
         GradedSumset::<Goldilocks>::builder(inputs, budget, &targets).bounded(cap);
@@ -176,7 +221,9 @@ pub fn w_sasamoto(inputs: &[u64], outputs: &[u64]) -> Ambiguity {
         return Ambiguity::Unknown;
     };
     let mut peak: Option<f64> = None;
-    let sum_a: u64 = inputs.iter().sum();
+    let Some(sum_a) = checked_total(inputs) else {
+        return Ambiguity::Unknown;
+    };
     for target in targets {
         if target == 0 || target >= sum_a {
             continue;
@@ -220,10 +267,15 @@ pub struct CountReport {
 }
 
 /// Feasibility cascade over the four `W(E)` counting paths: [`w_brute`] → [`w_dp`] →
-/// [`w_sparse`] → [`w_sasamoto`], in order of decreasing guarantee strength. Each tier
-/// self-gates to `Ambiguity::Unknown` when it can't handle the input (budget/regime), so
-/// this is simply "try in order, accept the first non-`Unknown`" — the exact tiers are
-/// tried first, so `w_count` always returns the strongest guarantee available.
+/// [`w_sparse`] → [`w_sasamoto`]. Each tier self-gates to `Ambiguity::Unknown` when it can't
+/// handle the input (budget/regime).
+///
+/// The acceptance order is `Exact` → Dense `LogApprox` → `LowerBound` → `Unknown`, which is NOT
+/// decreasing guarantee strength: a Dense saddle-point approximation is preferred over a
+/// truncated `LowerBound` from the same input. That is deliberate and the reason is magnitude,
+/// not guarantee — a lower bound that saturated far below the true count is a worse description
+/// of a large dense mix than an approximation of its logarithm. Callers that need a strict floor
+/// must read the variant, not the tier.
 ///
 /// Counts all subset sizes (`max_size = inputs.len()`, i.e. the full `W(E)`).
 #[must_use]
@@ -248,39 +300,19 @@ pub fn w_count(inputs: &[u64], outputs: &[u64]) -> CountReport {
         };
     }
 
-    // Sparse: accept immediately ONLY when Exact. A truncated `LowerBound` is a poor magnitude
-    // signal for a large dense mix (the count saturates far below the true value), so we hold it and
-    // prefer the Sasamoto saddle-point's accurate log-magnitude when the input is in the Dense regime.
-    // Priority: Exact > Sasamoto LogApprox (Dense) > sparse LowerBound > Unknown.
+    // The last two tiers are one decision, not two tests: a truncated `LowerBound` describes a
+    // large dense mix badly (the count saturates far below the truth), so an in-regime
+    // saddle-point estimate is preferred over it — while an exact sparse count beats both. Matching
+    // the pair says that in the shape of the values instead of recovering it from three bits.
     let sparse = w_sparse(inputs, outputs, max_size, DEFAULT_MEMORY_BUDGET);
-    if sparse.is_exact() {
-        return CountReport {
-            ambiguity: sparse,
-            method: Method::Sparse,
-        };
-    }
-
-    let sasa = w_sasamoto(inputs, outputs);
-    if sasa.is_approx() {
-        return CountReport {
-            ambiguity: sasa,
-            method: Method::Sasamoto,
-        };
-    }
-
-    // No exact count and no in-regime approximation: fall back to sparse's LowerBound if it produced
-    // one (a guaranteed floor), else Unknown.
-    if sparse.is_lower_bound() {
-        return CountReport {
-            ambiguity: sparse,
-            method: Method::Sparse,
-        };
-    }
-
-    CountReport {
-        ambiguity: Ambiguity::Unknown,
-        method: Method::None,
-    }
+    let sasamoto = w_sasamoto(inputs, outputs);
+    let (ambiguity, method) = match (sparse, sasamoto) {
+        (exact @ Ambiguity::Exact(_), _) => (exact, Method::Sparse),
+        (_, approx @ Ambiguity::LogApprox(_)) => (approx, Method::Sasamoto),
+        (floor @ Ambiguity::LowerBound(_), _) => (floor, Method::Sparse),
+        _ => (Ambiguity::Unknown, Method::None),
+    };
+    CountReport { ambiguity, method }
 }
 
 /// Distinct non-empty output subset sums.
@@ -418,19 +450,66 @@ mod tests {
     }
 
     #[test]
+    fn an_input_total_that_does_not_fit_is_refused_not_clamped() {
+        // Saturating would report u64::MAX and let the count proceed over a total no transaction
+        // has; the crate's answer to an input it cannot handle is Unknown.
+        let overflowing = [u64::MAX, 1];
+        assert_eq!(checked_total(&overflowing), None);
+        assert_eq!(w_brute(&overflowing, &[1], 2), Ambiguity::Unknown);
+        assert_eq!(
+            w_dp(&overflowing, &[1], 2, DP_MAX_CELLS),
+            Ambiguity::Unknown
+        );
+        assert_eq!(w_sasamoto(&overflowing, &[1]), Ambiguity::Unknown);
+        assert_eq!(checked_total(&[1, 2, 3]), Some(6));
+        assert_eq!(checked_total(&[]), Some(0));
+    }
+
+    #[test]
     fn radix_mappings_empty_or_zero_is_zero() {
-        assert_eq!(radix_mappings(&[], 6), Ambiguity::Exact(0));
-        assert_eq!(radix_mappings(&[1000], 0), Ambiguity::Exact(0));
+        assert_eq!(radix_mappings(&[], 6), Ambiguity::Diagnostic(0));
+        assert_eq!(radix_mappings(&[1000], 0), Ambiguity::Diagnostic(0));
     }
 
     #[test]
     fn radix_mappings_single_denom_output() {
-        assert_eq!(radix_mappings(&[1000], 6), Ambiguity::Exact(1));
+        assert_eq!(radix_mappings(&[1000], 6), Ambiguity::Diagnostic(1));
     }
 
     #[test]
-    fn radix_mappings_repeated_denom_increases_m() {
-        assert_eq!(radix_mappings(&[1000, 1000], 6), Ambiguity::Exact(4));
+    fn radix_mappings_repeated_denom_counts_the_value_once() {
+        // A value repeated m times is one value with m! permutations, not m values with m! each.
+        assert_eq!(radix_mappings(&[1000, 1000], 6), Ambiguity::Diagnostic(2));
+        assert_eq!(
+            radix_mappings(&[5000, 5000, 5000], 6),
+            Ambiguity::Diagnostic(6)
+        );
+    }
+
+    #[test]
+    fn radix_mappings_skips_decompositions_with_an_absent_denomination() {
+        // 5512 = 5000 + 512, but no output carries 512, so the k:1 exchange has no subset to
+        // swap and contributes nothing; the three 5000s still contribute 3! on their own.
+        assert_eq!(
+            radix_mappings(&[5000, 5000, 5000, 5512], 6),
+            Ambiguity::Diagnostic(6)
+        );
+        // With a 512 output present the same decomposition does contribute k × m! = 2 × 1!.
+        assert_eq!(
+            radix_mappings(&[512, 5000, 5512], 6),
+            Ambiguity::Diagnostic(1 + 1 + 2)
+        );
+    }
+
+    #[test]
+    fn radix_mappings_is_not_a_bound_on_the_mapping_count() {
+        // One input funding three equal outputs admits exactly one sub-transaction mapping, and
+        // the call cannot see that: it does not take the inputs. Tagging it `Diagnostic` is what
+        // keeps a consumer from reading 6 as a floor on 1.
+        let counted = radix_mappings(&[5000, 5000, 5000], 6);
+        assert_eq!(counted, Ambiguity::Diagnostic(6));
+        assert_eq!(counted.lower_bound_count(), None);
+        assert!(!counted.is_exact());
     }
 
     fn naive_output_subsums(outputs: &[u64]) -> HashSet<u64> {
@@ -525,15 +604,22 @@ mod tests {
             prop_assert_eq!(dp, brute);
         }
 
+        /// The composed invariant, over a width where the convolution can actually truncate:
+        /// `w_sparse` must never report more than the enumerated truth, whatever bound it carries.
         #[test]
         fn w_sparse_le_w_brute(
-            inputs in prop::collection::vec(1u64..=30, 2..=6),
-            outputs in prop::collection::vec(1u64..=30, 1..=4),
+            inputs in prop::collection::vec(1u64..=30, 2..=12),
+            outputs in prop::collection::vec(1u64..=30, 1..=6),
         ) {
-            let brute = w_brute(&inputs, &outputs, inputs.len()).lower_bound_count().unwrap_or(0);
-            let sparse = w_sparse(&inputs, &outputs, inputs.len(), nz(1_000_000))
-                .lower_bound_count().unwrap_or(0);
-            prop_assert!(sparse <= brute);
+            let brute = w_brute(&inputs, &outputs, inputs.len());
+            let sparse = w_sparse(&inputs, &outputs, inputs.len(), nz(1_000_000));
+            prop_assume!(!brute.is_unknown() && !sparse.is_unknown());
+            let brute_n = brute.lower_bound_count().unwrap_or(0);
+            let sparse_n = sparse.lower_bound_count().unwrap_or(0);
+            prop_assert!(sparse_n <= brute_n, "sparse {} > brute {}", sparse_n, brute_n);
+            if sparse.is_exact() {
+                prop_assert_eq!(sparse_n, brute_n);
+            }
         }
 
         #[test]
@@ -543,24 +629,47 @@ mod tests {
             k2 in 1usize..=6,
         ) {
             let (low, high) = (k1.min(k2), k1.max(k2));
-            let m_low = radix_mappings(&outputs, low).lower_bound_count().unwrap_or(0);
-            let m_high = radix_mappings(&outputs, high).lower_bound_count().unwrap_or(0);
+            let m_low = radix_mappings(&outputs, low).count().unwrap_or(0);
+            let m_high = radix_mappings(&outputs, high).count().unwrap_or(0);
             prop_assert!(m_high >= m_low);
         }
 
         #[test]
-        fn radix_mappings_always_exact(
+        fn radix_mappings_always_diagnostic(
             outputs in prop::collection::vec(1u64..=1_000_000, 1..=4),
             k in 1usize..=6,
         ) {
-            prop_assert!(matches!(radix_mappings(&outputs, k), Ambiguity::Exact(_)));
+            let counted = radix_mappings(&outputs, k);
+            prop_assert!(matches!(counted, Ambiguity::Diagnostic(_)));
+            prop_assert_eq!(counted.lower_bound_count(), None);
+        }
+
+        /// Duplicating the output multiset multiplies each value's multiplicity but adds no
+        /// distinct value, so the count moves only through `m!` — never through a per-coin
+        /// repetition of the same summand.
+        #[test]
+        fn radix_mappings_counts_values_not_coins(
+            outputs in prop::collection::vec(1u64..=1_000_000, 1..=4),
+            k in 1usize..=6,
+        ) {
+            let mut permuted = outputs.clone();
+            permuted.reverse();
+            prop_assert_eq!(radix_mappings(&outputs, k), radix_mappings(&permuted, k));
+
+            let distinct: std::collections::BTreeSet<u64> = outputs.iter().copied().collect();
+            if distinct.len() == outputs.len() {
+                // No repeats: every m is 1, so every surviving summand is k × 1! = k, and the
+                // total is bounded by k per distinct value.
+                let total = radix_mappings(&outputs, k).count().unwrap_or(0);
+                prop_assert!(total <= (k as u128) * distinct.len() as u128);
+            }
         }
 
         #[test]
-        fn radix_mappings_zero_max_size_is_exact_zero(
+        fn radix_mappings_zero_max_size_is_zero(
             outputs in prop::collection::vec(1u64..=100, 1..=4),
         ) {
-            prop_assert_eq!(radix_mappings(&outputs, 0), Ambiguity::Exact(0));
+            prop_assert_eq!(radix_mappings(&outputs, 0), Ambiguity::Diagnostic(0));
         }
 
         /// Empty/degenerate inputs always yield `Ambiguity::Unknown` from sasamoto.

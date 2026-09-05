@@ -106,7 +106,7 @@ pub enum CompareRegime {
 pub fn classify_regime(report: &ComparisonReport) -> CompareRegime {
     let median_w = {
         let mut ws: Vec<f64> = report.rows.iter().map(|r| r.w_exact).collect();
-        ws.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        ws.sort_by(f64::total_cmp);
         if ws.is_empty() { 0.0 } else { ws[ws.len() / 2] }
     };
     if report.n <= 20 && median_w < 50.0 {

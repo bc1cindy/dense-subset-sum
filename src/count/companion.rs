@@ -43,7 +43,7 @@ pub fn sasamoto_approx(set: &[u64], e_target: u64) -> Option<f64> {
     if set.is_empty() {
         return None;
     }
-    let sum_a: u64 = set.iter().sum();
+    let sum_a: u64 = set.iter().copied().fold(0u64, u64::saturating_add);
     if e_target == 0 || e_target >= sum_a {
         return None;
     }
@@ -69,8 +69,11 @@ pub fn sasamoto_approx_m(set: &[u64], m: usize, e_target: u64) -> Option<f64> {
     }
     let mut sorted: Vec<u64> = set.to_vec();
     sorted.sort_unstable();
-    let e_min: u64 = sorted[..m].iter().sum();
-    let e_max: u64 = sorted[set.len() - m..].iter().sum();
+    let e_min: u64 = sorted[..m].iter().copied().fold(0u64, u64::saturating_add);
+    let e_max: u64 = sorted[set.len() - m..]
+        .iter()
+        .copied()
+        .fold(0u64, u64::saturating_add);
     if e_target <= e_min || e_target >= e_max {
         return None;
     }

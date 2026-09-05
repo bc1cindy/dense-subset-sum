@@ -5,9 +5,11 @@ use dense_subset_sum::count::companion::{log_w_signed, sasamoto_approx};
 use dense_subset_sum::count::sparse_conv::Goldilocks;
 use dense_subset_sum::count::sumset::GradedSumsetBudget;
 use dense_subset_sum::{
-    Bound, Bracket, GradedSumset, KNEE, Regime, Transaction, brute_force_w, dp_w, fixtures,
-    log_w_for_e_sat,
+    Ambiguity, Bound, Bracket, GradedSumset, KNEE, Regime, Transaction, brute_force_w, dp_w,
+    fixtures, log_w_for_e_sat, radix_mappings, w_brute, w_sparse,
 };
+use proptest::prelude::*;
+use std::num::NonZeroUsize;
 
 // GradedSumset queries: small-N exactness, large-N truncation.
 mod sparse_conv_lookup {
@@ -89,6 +91,57 @@ mod oracles {
                 assert_eq!(bf, dp, "M={}, E={}", m, e);
             }
         }
+    }
+
+    proptest! {
+        /// The composed invariant the crate rests on, over the public entry points rather than
+        /// the sumset underneath them: whatever `w_sparse` reports, it never exceeds the
+        /// enumerated truth, and where it claims exactness the two agree. N reaches 12 so the
+        /// convolution can actually truncate — below about 8 every tier is exact and the
+        /// assertion is vacuous.
+        #[test]
+        fn w_sparse_never_exceeds_w_brute(
+            inputs in prop::collection::vec(1u64..=40, 2..=12),
+            outputs in prop::collection::vec(1u64..=40, 1..=6),
+        ) {
+            let budget = NonZeroUsize::new(1 << 20).unwrap();
+            let brute = w_brute(&inputs, &outputs, inputs.len());
+            let sparse = w_sparse(&inputs, &outputs, inputs.len(), budget);
+            prop_assume!(!brute.is_unknown() && !sparse.is_unknown());
+            let truth = brute.lower_bound_count().unwrap_or(0);
+            let got = sparse.lower_bound_count().unwrap_or(0);
+            prop_assert!(got <= truth, "w_sparse {} exceeds w_brute {}", got, truth);
+            if sparse.is_exact() {
+                prop_assert_eq!(got, truth);
+            }
+        }
+
+        /// The denominational count never enters the guaranteed-bound vocabulary, whatever the
+        /// outputs: it is a different object and `lower_bound_count` must refuse it.
+        #[test]
+        fn radix_mappings_is_never_a_bound(
+            outputs in prop::collection::vec(1u64..=2_000_000, 1..=6),
+            k in 1usize..=6,
+        ) {
+            let counted = radix_mappings(&outputs, k);
+            prop_assert!(matches!(counted, Ambiguity::Diagnostic(_)));
+            prop_assert_eq!(counted.lower_bound_count(), None);
+            prop_assert!(!counted.is_exact() && !counted.is_lower_bound());
+        }
+    }
+
+    #[test]
+    fn radix_mappings_follows_the_notebook_rule() {
+        // A value repeated m times contributes m! once, not m times; and a decomposition naming a
+        // denomination absent from the outputs has no subset to exchange.
+        assert_eq!(
+            radix_mappings(&[5000, 5000, 5000], 6),
+            Ambiguity::Diagnostic(6)
+        );
+        assert_eq!(
+            radix_mappings(&[5000, 5000, 5000, 5512], 6),
+            Ambiguity::Diagnostic(6)
+        );
     }
 
     #[test]

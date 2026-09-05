@@ -4,7 +4,7 @@ use crate::harness::vs_cja::{
     is_repeated_denomination_dense_case, non_derived_mappings_within, pairwise_input_output_prob,
 };
 use crate::{Ambiguity, KNEE, MAX_MONEY, Transaction, kappa};
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use std::num::NonZeroUsize;
@@ -15,13 +15,33 @@ fn ambiguity_to_dict(py: Python<'_>, amb: Ambiguity) -> PyResult<Py<PyDict>> {
     let kind = match amb {
         Ambiguity::Exact(_) => "exact",
         Ambiguity::LowerBound(_) => "lower_bound",
+        // A count of denomination exchanges, not of W(E): it bounds the subset-sum count in
+        // neither direction, so it must not share a kind with the tiers that do.
+        Ambiguity::Diagnostic(_) => "diagnostic",
         Ambiguity::LogApprox(_) => "log_approx",
         Ambiguity::Unknown => "unknown",
     };
     d.set_item("kind", kind)?;
-    d.set_item("count", amb.lower_bound_count())?; // Option<u128> -> int | None, no truncation
+    d.set_item("count", amb.count())?; // Option<u128> -> int | None, no truncation
     d.set_item("log_w", amb.log())?;
     Ok(d.unbind())
+}
+
+/// Amount lists whose total leaves the Bitcoin domain are rejected at the boundary rather than
+/// summed: the counting paths add them in `u64` and a debug build aborts on the overflow.
+fn checked_amounts(label: &str, values: &[u64]) -> PyResult<()> {
+    if valid_bitcoin_total(values) {
+        Ok(())
+    } else {
+        Err(PyValueError::new_err(format!(
+            "{label} sum exceeds MAX_MONEY ({MAX_MONEY} sat)"
+        )))
+    }
+}
+
+fn checked_sides(inputs: &[u64], outputs: &[u64]) -> PyResult<()> {
+    checked_amounts("inputs", inputs)?;
+    checked_amounts("outputs", outputs)
 }
 
 #[pyfunction]
@@ -31,11 +51,13 @@ fn w_brute(
     outputs: Vec<u64>,
     max_size: usize,
 ) -> PyResult<Py<PyDict>> {
+    checked_sides(&inputs, &outputs)?;
     ambiguity_to_dict(py, crate::compute::w_brute(&inputs, &outputs, max_size))
 }
 
 #[pyfunction]
 fn radix_mappings(py: Python<'_>, outputs: Vec<u64>, max_size: usize) -> PyResult<Py<PyDict>> {
+    checked_amounts("outputs", &outputs)?;
     ambiguity_to_dict(py, crate::compute::radix_mappings(&outputs, max_size))
 }
 
@@ -48,6 +70,7 @@ fn w_sparse(
     max_size: usize,
     memory_budget: usize,
 ) -> PyResult<Py<PyDict>> {
+    checked_sides(&inputs, &outputs)?;
     let mb = NonZeroUsize::new(memory_budget.max(1)).unwrap();
     ambiguity_to_dict(
         py,
@@ -57,15 +80,18 @@ fn w_sparse(
 
 #[pyfunction]
 fn w_sasamoto(py: Python<'_>, inputs: Vec<u64>, outputs: Vec<u64>) -> PyResult<Py<PyDict>> {
+    checked_sides(&inputs, &outputs)?;
     ambiguity_to_dict(py, crate::compute::w_sasamoto(&inputs, &outputs))
 }
 
 /// Feasibility-cascade dispatcher over the four W(E) paths: brute -> dp -> sparse -> sasamoto,
-/// returning the best available `Ambiguity` (kind/count/log_w) plus the `method` string that produced
-/// it ("brute"|"dp"|"sparse"|"sasamoto"|"none").
+/// returning the accepted `Ambiguity` (kind/count/log_w) plus the `method` string that produced it
+/// ("brute"|"dp"|"sparse"|"sasamoto"|"none"). Acceptance is Exact, then a Dense saddle-point
+/// approximation, then a truncated lower bound — magnitude order, not guarantee order.
 #[pyfunction]
 fn w_count(py: Python<'_>, inputs: Vec<u64>, outputs: Vec<u64>) -> PyResult<Py<PyDict>> {
     use crate::compute::Method;
+    checked_sides(&inputs, &outputs)?;
     let report = crate::compute::w_count(&inputs, &outputs);
     let d = ambiguity_to_dict(py, report.ambiguity)?;
     let method = match report.method {
@@ -81,6 +107,7 @@ fn w_count(py: Python<'_>, inputs: Vec<u64>, outputs: Vec<u64>) -> PyResult<Py<P
 
 #[pyfunction]
 fn per_coin_density(py: Python<'_>, inputs: Vec<u64>, outputs: Vec<u64>) -> PyResult<Py<PyDict>> {
+    checked_sides(&inputs, &outputs)?;
     let tx = Transaction::new(inputs.clone(), outputs);
     let n_in = inputs.len();
     let max_in = inputs.iter().copied().max().unwrap_or(0);

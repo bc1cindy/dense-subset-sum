@@ -197,6 +197,7 @@ pub fn pairwise_input_output_prob(non_derived: &[Mapping], tx: &Transaction) -> 
 /// deliberately skipped. This is only a tractability classification: it does not derive pairwise
 /// probabilities or certify ambiguity.
 #[must_use]
+#[cfg_attr(not(feature = "python"), allow(dead_code))]
 pub(crate) fn is_repeated_denomination_dense_case(
     inputs: &[u64],
     real_outputs: &[u64],

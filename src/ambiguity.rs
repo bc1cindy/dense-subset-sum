@@ -6,18 +6,24 @@ use crate::count::sumset::Bound;
 
 /// Count of ambiguity-producing interpretations of a transaction.
 ///
-/// Generalizes two paper-distinct objects:
-/// - `W(E) = #{S ⊆ A : ΣS = E}` (Sasamoto cond-mat/0106125) for `w_brute`/`w_sparse`/`w_sasamoto`
-/// - `Σ k × m!` equivalent mappings (Notebook/Maurer) for `radix_mappings`
-///
-/// Both quantify alternative interpretations indistinguishable to an adversary.
+/// `Exact`, `LowerBound` and `LogApprox` are guarantee strengths on one object,
+/// `W(E) = #{S ⊆ A : ΣS = E}` (Sasamoto cond-mat/0106125), produced by
+/// `w_brute`/`w_dp`/`w_sparse`/`w_sasamoto`. `Diagnostic` carries a *different* object and
+/// therefore no guarantee about `W(E)`; the two must not be ordered against each other.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum Ambiguity {
-    /// Exact count: full enumeration or untruncated sparse conv.
+    /// Exact `W(E)`: full enumeration or untruncated sparse conv.
     Exact(u128),
-    /// True count is ≥ this; sparse conv truncated.
+    /// True `W(E)` is ≥ this; sparse conv truncated.
     LowerBound(u128),
+    /// Exact evaluation of a formula over a different object, bounding `W(E)` in neither
+    /// direction. [`crate::radix_mappings`] is the only producer: its `Σ k × m!` counts
+    /// denomination exchanges among the outputs, does not take the inputs, and moves when
+    /// every coin is scaled by a constant — while the mapping count it might be mistaken for
+    /// does the opposite on both counts. Kept out of [`Self::lower_bound_count`] so no caller
+    /// can read it as a floor.
+    Diagnostic(u128),
     /// `ln(W)` via saddle-point. Approximation, never a strict bound. The stored value
     /// must be finite; use [`Self::log_approx`] or `Self::from(Some(_))` to construct
     /// safely (both filter NaN and ±∞ into [`Self::Unknown`]).
@@ -37,11 +43,22 @@ impl Ambiguity {
         }
     }
 
-    /// Strict lower bound on the true count; `None` for approximations.
+    /// Strict lower bound on the true `W(E)`; `None` for approximations and for
+    /// [`Self::Diagnostic`], which bounds nothing.
     #[must_use]
     pub fn lower_bound_count(&self) -> Option<u128> {
         match self {
             Self::Exact(n) | Self::LowerBound(n) => Some(*n),
+            Self::Diagnostic(_) | Self::LogApprox(_) | Self::Unknown => None,
+        }
+    }
+
+    /// The stored count whatever it counts, including [`Self::Diagnostic`]. Use
+    /// [`Self::lower_bound_count`] wherever the value has to be a floor on `W(E)`.
+    #[must_use]
+    pub fn count(&self) -> Option<u128> {
+        match self {
+            Self::Exact(n) | Self::LowerBound(n) | Self::Diagnostic(n) => Some(*n),
             Self::LogApprox(_) | Self::Unknown => None,
         }
     }
@@ -51,7 +68,9 @@ impl Ambiguity {
     #[must_use]
     pub fn log(&self) -> Option<f64> {
         match self {
-            Self::Exact(n) | Self::LowerBound(n) if *n > 0 => Some((*n as f64).ln()),
+            Self::Exact(n) | Self::LowerBound(n) | Self::Diagnostic(n) if *n > 0 => {
+                Some((*n as f64).ln())
+            }
             Self::LogApprox(lw) => Some(*lw),
             _ => None,
         }
@@ -65,6 +84,11 @@ impl Ambiguity {
     #[must_use]
     pub const fn is_lower_bound(&self) -> bool {
         matches!(self, Self::LowerBound(_))
+    }
+
+    #[must_use]
+    pub const fn is_diagnostic(&self) -> bool {
+        matches!(self, Self::Diagnostic(_))
     }
 
     #[must_use]
@@ -127,6 +151,17 @@ mod tests {
         assert_eq!(Ambiguity::LowerBound(42).lower_bound_count(), Some(42));
         assert_eq!(Ambiguity::LogApprox(3.5).lower_bound_count(), None);
         assert_eq!(Ambiguity::Unknown.lower_bound_count(), None);
+    }
+
+    #[test]
+    fn diagnostic_carries_a_count_but_never_a_bound() {
+        let d = Ambiguity::Diagnostic(42);
+        assert_eq!(d.count(), Some(42));
+        assert_eq!(d.lower_bound_count(), None);
+        assert!(d.is_diagnostic());
+        assert!(!d.is_exact() && !d.is_lower_bound() && !d.is_approx() && !d.is_unknown());
+        assert!((d.log().unwrap() - 42f64.ln()).abs() < 1e-12);
+        assert_eq!(Ambiguity::Diagnostic(0).log(), None);
     }
 
     #[test]
@@ -214,6 +249,8 @@ mod tests {
         fn lower_bound_count_only_on_counts(n: u128, lw: f64) {
             prop_assert_eq!(Ambiguity::Exact(n).lower_bound_count(), Some(n));
             prop_assert_eq!(Ambiguity::LowerBound(n).lower_bound_count(), Some(n));
+            prop_assert_eq!(Ambiguity::Diagnostic(n).lower_bound_count(), None);
+            prop_assert_eq!(Ambiguity::Diagnostic(n).count(), Some(n));
             let approx_lb = Ambiguity::log_approx(lw).lower_bound_count();
             prop_assert_eq!(approx_lb, None);
             prop_assert_eq!(Ambiguity::Unknown.lower_bound_count(), None);

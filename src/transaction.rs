@@ -12,26 +12,33 @@ pub struct Transaction {
 }
 
 impl Transaction {
+    /// Does not validate the Bitcoin amount domain; the accessors below saturate instead.
     #[must_use]
     pub fn new(inputs: Vec<u64>, outputs: Vec<u64>) -> Self {
         Self { inputs, outputs }
     }
 
+    /// Saturating: `new` is `pub` and does not enforce the Bitcoin domain, so a caller can
+    /// build a transaction whose side does not fit `u64`.
     #[must_use]
     pub fn input_sum(&self) -> u64 {
-        self.inputs.iter().sum()
+        self.inputs.iter().copied().fold(0u64, u64::saturating_add)
     }
 
+    /// Saturating, for the same reason as [`Self::input_sum`].
     #[must_use]
     pub fn output_sum(&self) -> u64 {
-        self.outputs.iter().sum()
+        self.outputs.iter().copied().fold(0u64, u64::saturating_add)
     }
 
+    /// `input_sum - output_sum`, saturating at the `i64` ends. Both sides are saturating `u64`
+    /// sums that can exceed `i64::MAX`, and `new` does not reject them, so the conversion is
+    /// clamped rather than asserted.
     #[must_use]
     pub fn fee(&self) -> i64 {
-        let inp = i64::try_from(self.input_sum()).expect("input_sum ≤ MAX_MONEY < i64::MAX");
-        let out = i64::try_from(self.output_sum()).expect("output_sum ≤ MAX_MONEY < i64::MAX");
-        inp - out
+        let inp = i64::try_from(self.input_sum()).unwrap_or(i64::MAX);
+        let out = i64::try_from(self.output_sum()).unwrap_or(i64::MAX);
+        inp.saturating_sub(out)
     }
 
     /// Count of value entries (`inputs.len() + outputs.len()`), not byte size.
@@ -81,6 +88,18 @@ mod tests {
         assert_eq!(tx.input_sum(), 600);
         assert_eq!(tx.output_sum(), 600);
         assert_eq!(tx.fee(), 0);
+    }
+
+    #[test]
+    fn sums_saturate_instead_of_overflowing() {
+        // `new` is pub and does not validate, so a caller can build this. Under a debug profile
+        // an unchecked `iter().sum()` here aborts the process.
+        let tx = Transaction::new(vec![u64::MAX, 1], vec![u64::MAX, 1]);
+        assert_eq!(tx.input_sum(), u64::MAX);
+        assert_eq!(tx.output_sum(), u64::MAX);
+        assert_eq!(tx.fee(), 0);
+        let one_sided = Transaction::new(vec![u64::MAX, 1], vec![1]);
+        assert_eq!(one_sided.fee(), i64::MAX - 1);
     }
 
     #[test]

@@ -264,9 +264,20 @@ impl std::fmt::Display for Bracket {
     }
 }
 
-/// `κ_c(x)` per eq (4.2, 4.3); symmetric about 1/2, peaks `κ_c(1/4)=1`. `None` when the saddle-point
-/// `α` leaves the finite solver bracket (near x = 1/2, `α → -∞`): there `find_alpha` is undefined, so
-/// κ_c is not reliably computable and callers must degrade to `Unknown` rather than panic.
+/// `κ_c(x)` per eq (4.2, 4.3). Eq (4.3) defines `x = E/(N·L)` on `(0, 1/2)` — `α → +∞` sends
+/// `x → 0` and `α → -∞` sends `x → 1/2` — and there it is exactly symmetric about 1/4, since
+/// `α ↔ -α` maps `x ↔ 1/2 - x` and leaves κ_c fixed. It peaks at `κ_c(1/4) = 1`.
+///
+/// The fold below extends that to the `(0, 1]` domain [`kappa_c`] admits, and is a LOCAL choice
+/// rather than the paper's. The symmetry that would license it is the complement one,
+/// `W(E) = W(ΣA - E)`, which reflects `x` about `ΣA/(2·N·L)`; `1 - x` is that reflection only
+/// when `ΣA = N·L`, i.e. every input equals `L`. Exposure is narrow rather than absent: at
+/// `L = max(A)` a feasible `E ≤ ΣA` gives `x ≤ mean(A)/max(A)`, so only sets whose mean exceeds
+/// half their maximum reach the folded region, and only equal sets reach `x = 1`.
+///
+/// `None` when the saddle-point `α` leaves the finite solver bracket (near x = 1/2, `α → -∞`):
+/// there `find_alpha` is undefined, so κ_c is not reliably computable and callers must degrade to
+/// `Unknown` rather than panic.
 fn kappa_c_at(x: f64) -> Option<f64> {
     let x = if x > 0.5 { 1.0 - x } else { x };
     // eq (4.3) at x = 1/2: α → -∞, integrand cancels.
@@ -276,22 +287,8 @@ fn kappa_c_at(x: f64) -> Option<f64> {
     if x < ASYMPTOTIC_THRESHOLD {
         return Some(2.0 * x.sqrt() / LN_2);
     }
-    // Guard find_alpha's precondition (it asserts x within [f(hi), f(lo)] and panics otherwise —
-    // its documented private contract). Near x = 1/2 the required α exits ALPHA_BRACKET, so x can
-    // fall outside; return None there instead of tripping the assert.
-    let (lo, hi) = ALPHA_BRACKET;
-    let f = |alpha: f64| {
-        trapezoidal_integral(
-            |s| s / (1.0 + (alpha * s).exp()),
-            0.0,
-            1.0,
-            TRAPEZOIDAL_STEPS,
-        )
-    };
-    if !(f(lo) >= x && f(hi) <= x) {
-        return None;
-    }
-    let alpha = find_alpha(x);
+    // Near x = 1/2 the required α exits ALPHA_BRACKET, so find_alpha has no saddle to bisect.
+    let alpha = find_alpha(x)?;
     let integral = trapezoidal_integral(
         |s| (1.0 + (-alpha * s).exp()).ln(),
         0.0,
@@ -301,8 +298,9 @@ fn kappa_c_at(x: f64) -> Option<f64> {
     Some((integral + alpha * x) / LN_2)
 }
 
-/// Inverts ∫₀¹ s/(1+e^(α·s)) ds = x; integrand monotone in α.
-fn find_alpha(x: f64) -> f64 {
+/// Inverts ∫₀¹ s/(1+e^(α·s)) ds = x; integrand monotone in α. `None` when x falls outside
+/// `[f(hi), f(lo)]`, where there is no α in the bracket to bisect for.
+fn find_alpha(x: f64) -> Option<f64> {
     let (lo, hi) = ALPHA_BRACKET;
     let f = |alpha: f64| {
         trapezoidal_integral(
@@ -312,16 +310,10 @@ fn find_alpha(x: f64) -> f64 {
             TRAPEZOIDAL_STEPS,
         )
     };
-    assert!(
-        f(lo) >= x && f(hi) <= x,
-        "find_alpha: x = {} outside bracket [f({})={}, f({})={}]",
-        x,
-        lo,
-        f(lo),
-        hi,
-        f(hi),
-    );
-    crate::count::numeric::bisect(f, lo, hi, x, 200, 1e-12)
+    if f(lo) < x || f(hi) > x {
+        return None;
+    }
+    Some(crate::count::numeric::bisect(f, lo, hi, x, 200, 1e-12))
 }
 
 fn trapezoidal_integral<F: Fn(f64) -> f64>(integrand: F, lo: f64, hi: f64, steps: usize) -> f64 {
@@ -494,14 +486,39 @@ mod tests {
         );
     }
 
+    /// The paper's own symmetry, inside eq (4.3)'s domain: `α ↔ -α` maps `x ↔ 1/2 - x` and
+    /// leaves κ_c fixed, so the curve is symmetric about 1/4 — not about 1/2.
     #[test]
-    fn kappa_c_symmetry() {
-        let kc1 = kappa_c_at(0.2).expect("in domain");
-        let kc2 = kappa_c_at(0.8).expect("in domain (symmetric to 0.2)");
-        assert!(
-            (kc1 - kc2).abs() < 1e-4,
-            "κ_c should be symmetric: κ_c(0.2)={kc1}, κ_c(0.8)={kc2}"
-        );
+    fn kappa_c_symmetric_about_one_quarter() {
+        for x in [0.02_f64, 0.05, 0.1, 0.15, 0.2] {
+            let lo = kappa_c_at(x).expect("in domain");
+            let hi = kappa_c_at(0.5 - x).expect("in domain");
+            assert!(
+                (lo - hi).abs() < 1e-4,
+                "κ_c({x}) = {lo} should equal κ_c({}) = {hi}",
+                0.5 - x
+            );
+        }
+    }
+
+    /// `x > 1/2` is outside eq (4.3); the fold that admits it is local. It stands in for the
+    /// complement symmetry `W(E) = W(ΣA - E)`, which reflects x about `ΣA/(2·N·L)` and equals
+    /// `1 - x` only when `ΣA = N·L`. At `L = max(A)` a feasible `E ≤ ΣA` gives
+    /// `x ≤ mean(A)/max(A)`, so the fold is only ever reached by sets whose mean exceeds half
+    /// their maximum — the near-equal regime where it is closest to being right, and exact only
+    /// at equality.
+    #[test]
+    fn kappa_c_above_one_half_is_a_local_fold() {
+        assert_eq!(kappa_c_at(0.8), kappa_c_at(0.2));
+
+        let feasible_max_x = |a: &[u64]| {
+            let l = *a.iter().max().unwrap() as f64;
+            a.iter().sum::<u64>() as f64 / (a.len() as f64 * l)
+        };
+        // Equal inputs: x reaches 1, and the fold is exactly the complement reflection.
+        assert!((feasible_max_x(&[10u64; 8]) - 1.0).abs() < 1e-12);
+        // Dispersed inputs: no feasible target reaches the folded region at all.
+        assert!(feasible_max_x(&[1u64, 2, 3, 4, 5, 6, 7, 100]) < 0.5);
     }
 
     /// Peaks at x=1/4 (α=0, `κ_c=1`), NOT at x=1/2 (paper Fig. 2 double-hump).
@@ -602,7 +619,7 @@ mod tests {
         /// f(find_alpha(x)) ≈ x within numerical domain.
         #[test]
         fn find_alpha_inverts_integral(x in 1e-4f64..(0.5 - 1e-4)) {
-            let alpha = find_alpha(x);
+            let Some(alpha) = find_alpha(x) else { return Ok(()) };
             let f_at_alpha = trapezoidal_integral(
                 |s| s / (1.0 + (alpha * s).exp()), 0.0, 1.0, TRAPEZOIDAL_STEPS);
             prop_assert!(
@@ -623,11 +640,12 @@ mod tests {
             prop_assert!(kc.is_finite() && kc >= 0.0);
         }
 
-        /// κ_c(x) = κ_c(1−x) (paper Fig. 2: symmetric about 1/2).
+        /// `kappa_c_at` is defined on all of (0, 1) and agrees with itself across the local fold.
         #[test]
-        fn kappa_c_symmetric_about_half(x in 1e-3f64..0.499) {
+        fn kappa_c_fold_above_half_is_total(x in 1e-3f64..0.499) {
             // kappa_c_at folds x -> 1-x internally, so both calls share an internal x: equal, or
-            // both None near 1/2 (outside the solver domain). Never asymmetric.
+            // both None near 1/2 (outside the solver domain). This pins the fold's totality, not a
+            // symmetry of κ_c; the paper's symmetry is about 1/4 and lives inside (0, 1/2).
             match (kappa_c_at(x), kappa_c_at(1.0 - x)) {
                 (Some(kc1), Some(kc2)) => prop_assert!(
                     (kc1 - kc2).abs() < 1e-4,
@@ -771,15 +789,14 @@ mod tests {
     }
 
     #[test]
-    fn find_alpha_outside_domain_panics() {
+    fn find_alpha_outside_domain_is_none() {
         // x ≪ ASYMPTOTIC_THRESHOLD: f(hi) ≈ 0.5/hi² overshoots x, fails the
         // f(hi) ≤ x check. x ≈ 0.5: f(lo) approaches 0.5 from below but the
         // trapezoidal residual exceeds f64::EPSILON, fails the f(lo) ≥ x check.
         // Callers route through kappa_c_at, which short-circuits both regions.
         let unsupported = [1e-100, f64::EPSILON, f64::MIN_POSITIVE, 0.5 - f64::EPSILON];
         for x in unsupported {
-            let result = std::panic::catch_unwind(|| find_alpha(x));
-            assert!(result.is_err(), "find_alpha({x:e}) should panic");
+            assert_eq!(find_alpha(x), None, "find_alpha({x:e}) should decline");
         }
     }
 
